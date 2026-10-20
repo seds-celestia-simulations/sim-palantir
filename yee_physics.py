@@ -51,7 +51,7 @@ def step(n):
     """Advance the fields by one time step."""
     global E, B
 
-    # Same short sinusoidal pulse used in the original script.
+    # Short sinusoidal pulse.
     t = (n + 0.5) * dt
     pulse = np.sin(2 * np.pi * 0.08 * t) * np.exp(-((t - 9.0) / 3.5)**2)
     J = pulse * J_shape

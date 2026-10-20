@@ -10,7 +10,7 @@ import yee_physics as sim
 
 # Window and camera settings.
 WIDTH, HEIGHT = 1000, 800
-camera_distance = 85.0
+camera_distance = 200.0
 rotation_x, rotation_y = 25.0, 35.0
 paused = False
 step_number = 0

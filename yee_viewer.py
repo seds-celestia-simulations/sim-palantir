@@ -96,7 +96,7 @@ def draw_field():
         return
 
     # Hide values close to zero so the wave pattern is easier to see.
-    mask = np.abs(values) > 0.06 * peak
+    mask = np.abs(values) > 0.02 * peak
     vertices = np.ascontiguousarray(coordinates[mask], dtype=np.float32)
     values = values[mask] / peak
     strength = np.abs(values)

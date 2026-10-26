@@ -42,21 +42,17 @@ def divergence(F, difference):
 current_sources = (
     {
         "source shape": sources.SourceShapes.dipole(
-                    axis=1,
-                    room_length=N,
-                    source_position=(30, 50, 50),
-                    dipole_length=10,
-                    maximum_signal_strength=10.0
-                ),
+            axis = 1,
+            room_length = N,
+            source_position = (30, 50, 50)
+        ),
         "temporal behaviour": lambda t: sources.TemporalBehaviours.gaussian_pulse(t, start_time=20.0)
     },
     {
         "source shape": sources.SourceShapes.dipole(
-            axis=2,
-            room_length=N,
-            source_position=(70, 50, 50),
-            dipole_length=10,
-            maximum_signal_strength=10.0
+            axis = 2,
+            room_length = N,
+            source_position = (70, 50, 50),
         ),
         "temporal behaviour": lambda t: sources.TemporalBehaviours.continuous_wave(t, time_constant=5.0, angular_frequency=0.6)
     }

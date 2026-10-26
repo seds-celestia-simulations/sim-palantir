@@ -11,7 +11,7 @@ class SourceShapes:
     def vortex_loop(
         dx: float,
         axis: int,
-        room_length: int = 100,
+        room_length: int,
         source_position: tuple[int, int, int] | None = None,
         maximum_signal_strength: float = 10.0
     ) -> NDArray[np.float64]:
@@ -20,15 +20,14 @@ class SourceShapes:
         Args:
             dx: The length of one grid cell in the simulation
             axis: The axis along which the dipole should be oriented. (0: x, 1: y, 2: z).
-            room_length: The length of the simulation container (default: 100).
+            room_length: The length of the simulation container.
             source_position: A tuple of the form (x, y, z) representing the position of the source. Defaults to the centre.
             maximum_signal_strength: The maximum amplitude of current density (default: 10.0).
 
         Returns:
             An array of shape (3, room_length, room_length, room_length).
         """
-        if source_position is None:
-            source_position = (room_length // 2, room_length // 2, room_length // 2)
+        if source_position is None: source_position = (room_length // 2, room_length // 2, room_length // 2)
 
         x, y, z = np.ogrid[: room_length, : room_length, : room_length]
         A = np.zeros((3, room_length, room_length, room_length))
@@ -47,34 +46,50 @@ class SourceShapes:
     @staticmethod
     def dipole(
         axis: int,
-        room_length: int = 100,
+        room_length: int,
         source_position: tuple[int, int, int] | None = None,
-        dipole_length: int = 8,
+        dipole_length: int = 12,
         maximum_signal_strength: float = 10.0
     ) -> NDArray[np.float64]:
         """A current source shaped like a magnetic dipole, oriented along one of the coordinate axes.
 
         Args:
             axis: The axis along which the dipole should be oriented. (0: x, 1: y, 2: z)
-            room_length: The length of the simulation container (default: 100).
+            room_length: The length of the simulation container.
             source_position: A tuple of the form (x, y, z) representing the position of the source. Defaults to the centre.
-            dipole_length: The length of the current source (default: 8)
+            dipole_length: The length of the current source (default: 12)
             maximum_signal_strength: The maximum amplitude of current density (default: 10.0)
 
         Returns:
             A 3D array of shape (3, room_length, room_length, room_length).
         """
-        if source_position is None:
-            source_position = (room_length // 2, room_length // 2, room_length // 2)
-
-        spatial_indices = [source_position[0], source_position[1], source_position[2]]
-        spatial_indices[axis] = slice(
-            spatial_indices[axis] - dipole_length // 2,
-            spatial_indices[axis] + dipole_length // 2,
-        )
+        if source_position is None: source_position = (room_length // 2, room_length // 2, room_length // 2)
 
         J_shape = np.zeros((3, room_length, room_length, room_length))
-        J_shape[axis, spatial_indices[0], spatial_indices[1], spatial_indices[2]] = maximum_signal_strength * np.sin(np.linspace(0, np.pi, dipole_length)) # The sine factor is required here to enforce charge conservation.
+
+        x, y, z = np.ogrid[: room_length, : room_length, : room_length]
+        source_x, source_y, source_z = source_position
+        match axis:
+            case 0:
+                r_parallel = x - source_x
+                r_perpendicular_1 = y - source_y
+                r_perpendicular_2 = z - source_z
+            case 1:
+                r_parallel = y - source_y
+                r_perpendicular_1 = x - source_x
+                r_perpendicular_2 = z - source_z
+            case 2:
+                r_parallel = z - source_z
+                r_perpendicular_1 = x - source_x
+                r_perpendicular_2 = y - source_y
+        half_dipole_length = dipole_length / 2.0
+        # The additional factors multiplied here are required for enforcing charge conservation.
+        J_shape[axis] = maximum_signal_strength * np.exp(-(r_perpendicular_1 ** 2 + r_perpendicular_2 ** 2) / 4.0) * np.where(
+            np.abs(r_parallel) <= half_dipole_length,
+            0.5 * (1.0 + np.cos(np.pi * r_parallel / half_dipole_length)),
+            0.0
+        )
+
         return J_shape
 
 

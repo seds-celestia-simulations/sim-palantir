@@ -50,7 +50,7 @@ class SourceShapes:
         axis: int,
         room_length: int = 100,
         source_position: tuple[int, int, int] | None = None,
-        dipole_length: int = 5,
+        dipole_length: int = 8,
         maximum_signal_strength: float = 10.0
     ) -> NDArray[np.float64]:
         """A current source shaped like a magnetic dipole, oriented along one of the coordinate axes.
@@ -59,7 +59,7 @@ class SourceShapes:
             axis: The axis along which the dipole should be oriented. (0: x, 1: y, 2: z)
             room_length: The length of the simulation container (default: 100).
             source_position: A tuple of the form (x, y, z) representing the position of the source. Defaults to the centre.
-            dipole_length: The length of the current source (default: 5)
+            dipole_length: The length of the current source (default: 8)
             maximum_signal_strength: The maximum amplitude of current density (default: 10.0)
 
         Returns:

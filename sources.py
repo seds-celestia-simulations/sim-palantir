@@ -27,9 +27,8 @@ class SourceShapes:
         Returns:
             An array of shape (3, room_length, room_length, room_length).
         """
-
-        # the default value of source_position cannot be defined within the function declaration itself because room_length belongs to the same scope.
-        if source_position is None: source_position = (room_length // 2, room_length // 2, room_length // 2)
+        if source_position is None:
+            source_position = (room_length // 2, room_length // 2, room_length // 2)
 
         x, y, z = np.ogrid[: room_length, : room_length, : room_length]
         A = np.zeros((3, room_length, room_length, room_length))
@@ -75,7 +74,7 @@ class SourceShapes:
         )
 
         J_shape = np.zeros((3, room_length, room_length, room_length))
-        J_shape[axis, spatial_indices[0], spatial_indices[1], spatial_indices[2]] = maximum_signal_strength
+        J_shape[axis, spatial_indices[0], spatial_indices[1], spatial_indices[2]] = maximum_signal_strength * np.sin(np.linspace(0, np.pi, dipole_length)) # The sine factor is required here to enforce charge conservation.
         return J_shape
 
 

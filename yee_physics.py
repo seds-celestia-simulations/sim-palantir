@@ -1,6 +1,7 @@
 """Minimal 3D Yee-FDTD physics, with no visualization."""
 
 import numpy as np
+import sources
 
 eps_fixed = 8.854*(10**(-12))  # Vacuum permittivity (F/m)
 mu_fixed = 1.257*(10**(-6))  # Vacuum permeability (H/m)
@@ -54,20 +55,34 @@ def divergence(F, difference):
     return sum(difference(F[a], a) for a in range(3))
 
 
-# Build a localized, divergence-free current source.
-x, y, z = np.ogrid[:N, :N, :N]
-r2 = (x - N / 2)**2 + (y - N / 2)**2 + (z - N / 2)**2
+current_sources = (
+    {
+        "source shape": sources.SourceShapes.dipole(
+            axis = 1,
+            room_length = N,
+            source_position = (30, 50, 50)
+        ),
+        "temporal behaviour": lambda t: sources.TemporalBehaviours.gaussian_pulse(t, start_time=20.0)
+    },
+    {
+        "source shape": sources.SourceShapes.dipole(
+            axis = 2,
+            room_length = N,
+            source_position = (70, 50, 50),
+        ),
+        "temporal behaviour": lambda t: sources.TemporalBehaviours.continuous_wave(t, time_constant=5.0, angular_frequency=0.6)
+    }
+)
 
-A = np.zeros_like(E)
-A[2] = np.exp(-r2 / (2 * 2.0**2))
-J_shape = curl(A, backward)
+
+J_shape = np.zeros((3, N, N, N))
+for current_source in current_sources: J_shape += current_source["source shape"]
 
 
 def step(n):
     """Advance the fields by one time step."""
     global E, B, H
 
-    # Short sinusoidal pulse.
     t = (n + 0.5) * dt
     tau = t*c/dx
 

@@ -9,7 +9,7 @@ from OpenGL.GLU import gluPerspective, gluProject
 import yee_physics as sim
 
 # Window and camera settings.
-WIDTH, HEIGHT = 1000, 800
+WIDTH, HEIGHT = 1000,800
 camera_distance = 200.0
 rotation_x, rotation_y = 25.0, 35.0
 paused = False
@@ -88,7 +88,7 @@ def draw_axes(size):
     glEnable(GL_DEPTH_TEST)
 
 
-def draw_field():
+'''def draw_field():
     """Render Ey as a 3D point cloud: red positive, blue negative."""
     values = sim.E[1].ravel()
     peak = np.max(np.abs(values))
@@ -96,7 +96,7 @@ def draw_field():
         return
 
     # Hide values close to zero so the wave pattern is easier to see.
-    mask = np.abs(values) > 0.06 * peak
+    mask = np.abs(values) > 0.04 * peak
     vertices = np.ascontiguousarray(coordinates[mask], dtype=np.float32)
     values = values[mask] / peak
     strength = np.abs(values)
@@ -121,6 +121,57 @@ def draw_field():
     glPointSize(4.0)
     glDrawArrays(GL_POINTS, 0, len(vertices))
     glDisableClientState(GL_COLOR_ARRAY)
+    glDisableClientState(GL_VERTEX_ARRAY)'''
+
+def draw_field():
+    """Display total E magnitude, coloured by the sign of Ey."""
+
+    # Total electric field magnitude
+    magnitude = np.sqrt(np.sum(sim.E**2, axis=0)).ravel()
+
+    # Signed Ey component determines colour
+    Ey = sim.E[1].ravel()
+
+    peak = np.max(magnitude)
+    if peak < 1e-12:
+        return
+
+    # Use total magnitude to decide visibility
+    mask = magnitude > 0.06 * peak
+
+    vertices = np.ascontiguousarray(
+        coordinates[mask], dtype=np.float32
+    )
+
+    strength = magnitude[mask] / peak
+    positive = Ey[mask] >= 0
+
+    colors = np.empty((len(strength), 3), dtype=np.float32)
+
+    # Positive Ey: orange
+    colors[positive] = np.column_stack((
+        np.ones(np.sum(positive)),
+        0.15 + 0.45 * (1 - strength[positive]),
+        np.full(np.sum(positive), 0.08),
+    ))
+
+    # Negative Ey: blue
+    colors[~positive] = np.column_stack((
+        np.full(np.sum(~positive), 0.08),
+        0.15 + 0.45 * (1 - strength[~positive]),
+        np.ones(np.sum(~positive)),
+    ))
+
+    glEnableClientState(GL_VERTEX_ARRAY)
+    glEnableClientState(GL_COLOR_ARRAY)
+
+    glVertexPointer(3, GL_FLOAT, 0, vertices)
+    glColorPointer(3, GL_FLOAT, 0, np.ascontiguousarray(colors))
+
+    glPointSize(4.0)
+    glDrawArrays(GL_POINTS, 0, len(vertices))
+
+    glDisableClientState(GL_COLOR_ARRAY)
     glDisableClientState(GL_VERTEX_ARRAY)
 
 
@@ -143,7 +194,7 @@ def draw_source():
 def draw_text(font, x, y, text, color=(235, 238, 245)):
     """Draw transparent Pygame text at screen coordinates (bottom-left origin)."""
     surface = font.render(text, True, color)
-    pixels = pygame.image.tostring(surface, "RGBA", True)
+    pixels = pygame.image.tobytes(surface, "RGBA", True)
 
     # Blend the transparent background away; without this, text can appear as bars.
     glEnable(GL_BLEND)

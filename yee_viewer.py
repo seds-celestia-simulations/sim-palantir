@@ -1,12 +1,19 @@
 """Interactive 3D viewer for the Yee-FDTD physics module."""
 
+import cupy as cp
 import numpy as np
 import pygame
+import time
+from ctypes import c_void_p
 from pygame.locals import *
 from OpenGL.GL import *
 from OpenGL.GLU import gluPerspective, gluProject
+from OpenGL.GL.shaders import compileProgram, compileShader
 
 import yee_physics as sim
+print("E type:", type(sim.E))
+print("E device:", sim.E.device)
+print("Source type:", type(sim.J_shape))
 
 # Window and camera settings.
 WIDTH, HEIGHT = 1000,800
@@ -19,10 +26,19 @@ step_number = 0
 coordinates = np.indices((sim.N, sim.N, sim.N), dtype=np.float32)
 coordinates = coordinates.reshape(3, -1).T
 coordinates -= sim.N / 2
+# Keep a copy of the coordinate array on the GPU.
+gpu_coordinates = cp.asarray(coordinates, dtype=cp.float32)
+shader_program = None
+position_vbo = None
+value_vbo = None
+
+# OpenGL buffer, initialized after the window is created.
+field_vbo = None
 
 # Mark the spatial region occupied by the current source.
-source_strength = np.sqrt(np.sum(sim.J_shape**2, axis=0))
-source_mask = source_strength > 0.25 * source_strength.max()
+source_strength = cp.sqrt(cp.sum(sim.J_shape**2, axis=0))
+source_mask_gpu = (source_strength > 0.25 * source_strength.max())
+source_mask = cp.asnumpy(source_mask_gpu)
 source_coordinates = np.ascontiguousarray(coordinates[source_mask.ravel()], dtype=np.float32)
 
 
@@ -88,15 +104,130 @@ def draw_axes(size):
     glEnable(GL_DEPTH_TEST)
 
 
+VERTEX_SHADER = """
+#version 120
+
+attribute vec3 a_position;
+attribute float a_field;
+
+uniform float u_peak;
+uniform float u_threshold;
+
+varying vec3 v_color;
+
+void main()
+{
+    float strength = abs(a_field) / max(u_peak, 1e-30);
+
+    // Hide weak field points without CPU filtering.
+    if (strength <= u_threshold) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    } else {
+        gl_Position = gl_ModelViewProjectionMatrix
+                      * vec4(a_position, 1.0);
+    }
+
+    // Preserve your original positive/negative colours.
+    float green = 0.15 + 0.45 * (1.0 - strength);
+
+    if (a_field >= 0.0) {
+        v_color = vec3(1.0, green, 0.08);
+    } else {
+        v_color = vec3(0.08, green, 1.0);
+    }
+}
+"""
+
+FRAGMENT_SHADER = """
+#version 120
+
+varying vec3 v_color;
+
+void main()
+{
+    gl_FragColor = vec4(v_color, 1.0);
+}
+"""
+
+
+
+def draw_field():
+    # Calculate field peak on CUDA.
+    field_gpu = sim.E[1]
+    peak = float(cp.max(cp.abs(field_gpu)).item())
+
+    if peak < 1e-12:
+        return 0
+
+    # Transfer ONLY field values, as float32.
+    field_cpu = np.ascontiguousarray(
+        cp.asnumpy(field_gpu.astype(cp.float32)).ravel()
+    )
+
+    # Update the existing field buffer.
+    glBindBuffer(GL_ARRAY_BUFFER, value_vbo)
+    glBufferSubData(
+        GL_ARRAY_BUFFER,
+        0,
+        field_cpu.nbytes,
+        field_cpu
+    )
+
+    glUseProgram(shader_program)
+
+    glUniform1f(
+        glGetUniformLocation(shader_program, "u_peak"),
+        peak
+    )
+    glUniform1f(
+        glGetUniformLocation(shader_program, "u_threshold"),
+        0.01
+    )
+
+    # Static positions.
+    position_location = glGetAttribLocation(
+        shader_program, "a_position"
+    )
+    glBindBuffer(GL_ARRAY_BUFFER, position_vbo)
+    glEnableVertexAttribArray(position_location)
+    glVertexAttribPointer(
+        position_location, 3, GL_FLOAT,
+        GL_FALSE, 0, c_void_p(0)
+    )
+
+    # Dynamic Ey values.
+    field_location = glGetAttribLocation(
+        shader_program, "a_field"
+    )
+    glBindBuffer(GL_ARRAY_BUFFER, value_vbo)
+    glEnableVertexAttribArray(field_location)
+    glVertexAttribPointer(
+        field_location, 1, GL_FLOAT,
+        GL_FALSE, 0, c_void_p(0)
+    )
+
+    glPointSize(4.0)
+    glDrawArrays(GL_POINTS, 0, sim.N**3)
+
+    glDisableVertexAttribArray(position_location)
+    glDisableVertexAttribArray(field_location)
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0)
+    glUseProgram(0)
+
+    return sim.N**3
+
 '''def draw_field():
     """Render Ey as a 3D point cloud: red positive, blue negative."""
-    values = sim.E[1].ravel()
+    #values = cp.asnumpy(sim.E[1, ::2, ::2, ::2]).ravel()
+    values = cp.asnumpy(sim.E[1]).ravel()
     peak = np.max(np.abs(values))
     if peak < 1e-12:
         return
 
     # Hide values close to zero so the wave pattern is easier to see.
-    mask = np.abs(values) > 0.02 * peak
+    mask = np.abs(values) > 0.035 * peak
+    #vertices = np.ascontiguousarray(render_coordinates[mask], dtype=np.float32)
     vertices = np.ascontiguousarray(coordinates[mask], dtype=np.float32)
     values = values[mask] / peak
     strength = np.abs(values)
@@ -122,57 +253,6 @@ def draw_axes(size):
     glDrawArrays(GL_POINTS, 0, len(vertices))
     glDisableClientState(GL_COLOR_ARRAY)
     glDisableClientState(GL_VERTEX_ARRAY)'''
-
-def draw_field():
-    """Display total E magnitude, coloured by the sign of Ey."""
-
-    # Total electric field magnitude
-    magnitude = np.sqrt(np.sum(sim.E**2, axis=0)).ravel()
-
-    # Signed Ey component determines colour
-    Ey = sim.E[1].ravel()
-
-    peak = np.max(magnitude)
-    if peak < 1e-12:
-        return
-
-    # Use total magnitude to decide visibility
-    mask = magnitude > 0.06 * peak
-
-    vertices = np.ascontiguousarray(
-        coordinates[mask], dtype=np.float32
-    )
-
-    strength = magnitude[mask] / peak
-    positive = Ey[mask] >= 0
-
-    colors = np.empty((len(strength), 3), dtype=np.float32)
-
-    # Positive Ey: orange
-    colors[positive] = np.column_stack((
-        np.ones(np.sum(positive)),
-        0.15 + 0.45 * (1 - strength[positive]),
-        np.full(np.sum(positive), 0.08),
-    ))
-
-    # Negative Ey: blue
-    colors[~positive] = np.column_stack((
-        np.full(np.sum(~positive), 0.08),
-        0.15 + 0.45 * (1 - strength[~positive]),
-        np.ones(np.sum(~positive)),
-    ))
-
-    glEnableClientState(GL_VERTEX_ARRAY)
-    glEnableClientState(GL_COLOR_ARRAY)
-
-    glVertexPointer(3, GL_FLOAT, 0, vertices)
-    glColorPointer(3, GL_FLOAT, 0, np.ascontiguousarray(colors))
-
-    glPointSize(4.0)
-    glDrawArrays(GL_POINTS, 0, len(vertices))
-
-    glDisableClientState(GL_COLOR_ARRAY)
-    glDisableClientState(GL_VERTEX_ARRAY)
 
 
 def draw_source():
@@ -254,14 +334,55 @@ def projected_axis_labels(size):
     return labels
 
 
+def initialize_field_renderer():
+    global shader_program, position_vbo, value_vbo
+
+    shader_program = compileProgram(
+        compileShader(VERTEX_SHADER, GL_VERTEX_SHADER),
+        compileShader(FRAGMENT_SHADER, GL_FRAGMENT_SHADER)
+    )
+
+    position_vbo, value_vbo = [
+        int(v) for v in glGenBuffers(2)
+    ]
+
+    # Coordinates never change: upload them only once.
+    positions = np.ascontiguousarray(
+        coordinates, dtype=np.float32
+    )
+
+    glBindBuffer(GL_ARRAY_BUFFER, position_vbo)
+    glBufferData(
+        GL_ARRAY_BUFFER,
+        positions.nbytes,
+        positions,
+        GL_STATIC_DRAW
+    )
+
+    # Allocate a buffer for one float32 Ey value per cell.
+    glBindBuffer(GL_ARRAY_BUFFER, value_vbo)
+    glBufferData(
+        GL_ARRAY_BUFFER,
+        sim.N**3 * 4,
+        None,
+        GL_STREAM_DRAW
+    )
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0)
+
+
 def main():
     """Run the interactive 3D viewer."""
-    global camera_distance, rotation_x, rotation_y, paused, step_number
+    global camera_distance, rotation_x, rotation_y, paused, step_number, field_vbo
+
 
     pygame.init()
     font = pygame.font.Font(None, 23)
     pygame.display.set_caption("3D Yee FDTD | Ey field and source")
     pygame.display.set_mode((WIDTH, HEIGHT), DOUBLEBUF | OPENGL)
+    initialize_field_renderer()
+    field_vbo = glGenBuffers(1)
+    print("OpenGL GPU:", glGetString(GL_RENDERER).decode())
 
     glViewport(0, 0, WIDTH, HEIGHT)
     glMatrixMode(GL_PROJECTION)
@@ -304,11 +425,49 @@ def main():
             elif event.type == MOUSEWHEEL:
                 camera_distance = max(35, min(180, camera_distance - event.y * 4))
 
+        physics_ms = 0.0
         if not paused:
+            start = time.perf_counter()
             sim.step(step_number)
+            # Wait for GPU physics calculations to finish.
+            cp.cuda.get_current_stream().synchronize()
+            physics_ms = (time.perf_counter() - start) * 1000
             step_number += 1
 
+        '''if not paused:
+            sim.step(step_number)
+            step_number += 1'''
+
+        render_start = time.perf_counter()
+
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
+        glTranslatef(0, 0, -camera_distance)
+        glRotatef(rotation_x, 1, 0, 0)
+        glRotatef(rotation_y, 0, 1, 0)
+
+        draw_box(sim.N)
+        point_count = draw_field()
+        draw_source()
+        draw_axes(sim.N)
+        draw_overlay(font, projected_axis_labels(sim.N))
+
+        pygame.display.flip()
+
+        render_ms = (time.perf_counter() - render_start) * 1000
+
+        clock.tick(60)
+
+        if step_number % 60 == 0 and not paused:
+            print(
+                f"Physics: {physics_ms:.1f} ms | "
+                f"Viewer: {render_ms:.1f} ms | "
+                f"Points: {point_count} | "
+                f"FPS: {clock.get_fps():.1f}"
+            )
+
+        '''glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
         glTranslatef(0, 0, -camera_distance)
@@ -322,8 +481,8 @@ def main():
         draw_overlay(font, projected_axis_labels(sim.N))
 
         pygame.display.flip()
-        clock.tick(60)
-
+        clock.tick(60)'''
+    glDeleteBuffers(1, [field_vbo])
     pygame.quit()
 
 

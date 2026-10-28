@@ -99,7 +99,7 @@ class TemporalBehaviours:
     @staticmethod
     def gaussian_pulse(
         t: float,
-        start_time: float = 25.0,
+        start_time: float = 0.0,
         standard_deviation: float = 6.0,
         initial_phase: float = 0.0,
         angular_frequency: float = 0.6

@@ -21,6 +21,14 @@ camera_distance = 200.0
 rotation_x, rotation_y = 25.0, 35.0
 paused = False
 step_number = 0
+FIELD_OPACITY = 0.05
+OPACITY_MIN = 0.005
+OPACITY_MAX = 0.10
+
+SLIDER_X = 20
+SLIDER_Y = HEIGHT - 132
+SLIDER_HEIGHT = 200
+
 
 # Grid coordinates centered on the simulation's source.
 coordinates = np.indices((sim.N, sim.N, sim.N), dtype=np.float32)
@@ -114,10 +122,12 @@ uniform float u_peak;
 uniform float u_threshold;
 
 varying vec3 v_color;
+varying float v_strength;
 
 void main()
 {
     float strength = abs(a_field) / max(u_peak, 1e-30);
+    v_strength = clamp(strength, 0.0, 1.0);
 
     // Hide weak field points without CPU filtering.
     if (strength <= u_threshold) {
@@ -128,12 +138,11 @@ void main()
     }
 
     // Preserve your original positive/negative colours.
-    float green = 0.15 + 0.45 * (1.0 - strength);
-
     if (a_field >= 0.0) {
-        v_color = vec3(1.0, green, 0.08);
-    } else {
-        v_color = vec3(0.08, green, 1.0);
+    v_color = vec3(1.0, 0.05, 0.0);  // Positive: Red
+    }
+    else {
+    v_color = vec3(0.0, 0.05, 1.0);  // Negative: Blue
     }
 }
 """
@@ -142,10 +151,15 @@ FRAGMENT_SHADER = """
 #version 120
 
 varying vec3 v_color;
+varying float v_strength;
+
+uniform float u_opacity;
 
 void main()
 {
-    gl_FragColor = vec4(v_color, 1.0);
+    float alpha = u_opacity * sqrt(v_strength);
+
+    gl_FragColor = vec4(v_color, alpha);
 }
 """
 
@@ -183,6 +197,10 @@ def draw_field():
         glGetUniformLocation(shader_program, "u_threshold"),
         0.01
     )
+    glUniform1f(
+    glGetUniformLocation(shader_program, "u_opacity"),
+        FIELD_OPACITY
+    )
 
     # Static positions.
     position_location = glGetAttribLocation(
@@ -206,8 +224,23 @@ def draw_field():
         GL_FALSE, 0, c_void_p(0)
     )
 
+    # Blend contributions from all field points.
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE)
+
+    # Allow points inside the volume to remain visible.
+    glDisable(GL_DEPTH_TEST)
+    glDepthMask(GL_FALSE)
+
     glPointSize(4.0)
     glDrawArrays(GL_POINTS, 0, sim.N**3)
+
+    # Restore OpenGL state for the other objects.
+    glDepthMask(GL_TRUE)
+    glEnable(GL_DEPTH_TEST)
+    glDisable(GL_BLEND)
+    '''glPointSize(4.0)
+    glDrawArrays(GL_POINTS, 0, sim.N**3)'''
 
     glDisableVertexAttribArray(position_location)
     glDisableVertexAttribArray(field_location)
@@ -216,43 +249,6 @@ def draw_field():
     glUseProgram(0)
 
     return sim.N**3
-
-'''def draw_field():
-    """Render Ey as a 3D point cloud: red positive, blue negative."""
-    #values = cp.asnumpy(sim.E[1, ::2, ::2, ::2]).ravel()
-    values = cp.asnumpy(sim.E[1]).ravel()
-    peak = np.max(np.abs(values))
-    if peak < 1e-12:
-        return
-
-    # Hide values close to zero so the wave pattern is easier to see.
-    mask = np.abs(values) > 0.035 * peak
-    #vertices = np.ascontiguousarray(render_coordinates[mask], dtype=np.float32)
-    vertices = np.ascontiguousarray(coordinates[mask], dtype=np.float32)
-    values = values[mask] / peak
-    strength = np.abs(values)
-
-    colors = np.empty((len(values), 3), dtype=np.float32)
-    positive = values >= 0
-    colors[positive] = np.column_stack((
-        np.ones(np.sum(positive)),
-        0.15 + 0.45 * (1 - strength[positive]),
-        np.full(np.sum(positive), 0.08),
-    ))
-    colors[~positive] = np.column_stack((
-        np.full(np.sum(~positive), 0.08),
-        0.15 + 0.45 * (1 - strength[~positive]),
-        np.ones(np.sum(~positive)),
-    ))
-
-    glEnableClientState(GL_VERTEX_ARRAY)
-    glEnableClientState(GL_COLOR_ARRAY)
-    glVertexPointer(3, GL_FLOAT, 0, vertices)
-    glColorPointer(3, GL_FLOAT, 0, np.ascontiguousarray(colors))
-    glPointSize(4.0)
-    glDrawArrays(GL_POINTS, 0, len(vertices))
-    glDisableClientState(GL_COLOR_ARRAY)
-    glDisableClientState(GL_VERTEX_ARRAY)'''
 
 
 def draw_source():
@@ -284,6 +280,65 @@ def draw_text(font, x, y, text, color=(235, 238, 245)):
                  GL_RGBA, GL_UNSIGNED_BYTE, pixels)
     glDisable(GL_BLEND)
 
+def update_opacity_from_mouse(mouse_y):
+    global FIELD_OPACITY
+
+    # Convert Pygame Y to OpenGL Y.
+    y = HEIGHT - mouse_y
+
+    fraction = (y - (SLIDER_Y - SLIDER_HEIGHT)) / SLIDER_HEIGHT
+    fraction = max(0.0, min(1.0, fraction))
+
+    FIELD_OPACITY = OPACITY_MIN + fraction * (OPACITY_MAX - OPACITY_MIN)
+
+
+def mouse_over_opacity_slider(mouse_pos):
+    x, y = mouse_pos
+
+    slider_top = HEIGHT - SLIDER_Y
+    slider_bottom = slider_top + SLIDER_HEIGHT
+
+    return (
+        abs(x - SLIDER_X) <= 14
+        and slider_top <= y <= slider_bottom
+    )
+
+
+def draw_opacity_slider(font):
+    x = SLIDER_X
+    y = SLIDER_Y
+
+    fraction = (FIELD_OPACITY - OPACITY_MIN) / (OPACITY_MAX - OPACITY_MIN)
+    knob_y = y - SLIDER_HEIGHT + fraction * SLIDER_HEIGHT
+
+    draw_text(font, x, y + 15, f"Field opacity: {FIELD_OPACITY:.3f}")
+
+    # Background track.
+    glColor3f(0.25, 0.28, 0.35)
+    glBegin(GL_QUADS)
+    glVertex2f(x - 3, y)
+    glVertex2f(x + 3, y)
+    glVertex2f(x + 3, y - SLIDER_HEIGHT)
+    glVertex2f(x - 3, y - SLIDER_HEIGHT)
+    glEnd()
+
+    # Filled portion, from bottom to knob.
+    glColor3f(0.95, 0.55, 0.15)
+    glBegin(GL_QUADS)
+    glVertex2f(x - 3, y - SLIDER_HEIGHT)
+    glVertex2f(x + 3, y - SLIDER_HEIGHT)
+    glVertex2f(x + 3, knob_y)
+    glVertex2f(x - 3, knob_y)
+    glEnd()
+
+    # Draggable knob.
+    glColor3f(1.0, 0.9, 0.7)
+    glBegin(GL_QUADS)
+    glVertex2f(x - 9, knob_y - 5)
+    glVertex2f(x + 9, knob_y - 5)
+    glVertex2f(x + 9, knob_y + 5)
+    glVertex2f(x - 9, knob_y + 5)
+    glEnd()
 
 def draw_overlay(font, axis_labels):
     """Draw axis labels and a small legend over the 3D scene."""
@@ -306,6 +361,7 @@ def draw_overlay(font, axis_labels):
     draw_text(font, 15, HEIGHT - 53, "Yellow points: current-source region", (255, 220, 70))
     draw_text(font, 15, HEIGHT - 78, "Ey field: red positive, blue negative")
     draw_text(font, 15, 18, "Drag: rotate | Wheel: zoom | Space: pause | Esc: quit")
+    draw_opacity_slider(font)
 
     glEnable(GL_DEPTH_TEST)
     glPopMatrix()
@@ -394,36 +450,61 @@ def main():
 
     clock = pygame.time.Clock()
     dragging = False
+    opacity_dragging = False
     last_mouse = (0, 0)
     running = True
 
     while running:
         for event in pygame.event.get():
+
             if event.type == QUIT:
                 running = False
+
             elif event.type == KEYDOWN:
                 if event.key == K_ESCAPE:
                     running = False
                 elif event.key == K_SPACE:
                     paused = not paused
+
             elif event.type == MOUSEBUTTONDOWN:
+
                 if event.button == 1:
-                    dragging = True
-                    last_mouse = event.pos
+                    opacity_dragging = mouse_over_opacity_slider(event.pos)
+
+                    if opacity_dragging:
+                        update_opacity_from_mouse(event.pos[1])
+
                 elif event.button == 4:
                     camera_distance = max(35, camera_distance - 4)
+
                 elif event.button == 5:
                     camera_distance = min(180, camera_distance + 4)
-            elif event.type == MOUSEBUTTONUP and event.button == 1:
-                dragging = False
-            elif event.type == MOUSEMOTION and dragging:
-                dx_mouse = event.pos[0] - last_mouse[0]
-                dy_mouse = event.pos[1] - last_mouse[1]
-                rotation_y += dx_mouse * 0.5
-                rotation_x += dy_mouse * 0.5
-                last_mouse = event.pos
+
+            elif event.type == MOUSEBUTTONUP:
+
+                if event.button == 1:
+                    opacity_dragging = False
+
+            elif event.type == MOUSEMOTION:
+
+                if event.buttons[0]:  # Left mouse button held
+
+                    if opacity_dragging:
+                        # Move the slider vertically.
+                        update_opacity_from_mouse(event.pos[1])
+
+                    else:
+                        # Rotate the cube.
+                        dx_mouse, dy_mouse = event.rel
+
+                        rotation_y += dx_mouse * 0.5
+                        rotation_x += dy_mouse * 0.5
+
             elif event.type == MOUSEWHEEL:
-                camera_distance = max(35, min(180, camera_distance - event.y * 4))
+                camera_distance = max(
+                    35,
+                    min(180, camera_distance - event.y * 4)
+                )
 
         physics_ms = 0.0
         if not paused:
@@ -447,8 +528,8 @@ def main():
         glRotatef(rotation_x, 1, 0, 0)
         glRotatef(rotation_y, 0, 1, 0)
 
-        draw_box(sim.N)
         point_count = draw_field()
+        draw_box(sim.N)
         draw_source()
         draw_axes(sim.N)
         draw_overlay(font, projected_axis_labels(sim.N))

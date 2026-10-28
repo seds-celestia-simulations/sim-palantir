@@ -33,26 +33,6 @@ def compute_stable_dt(safety=0.85):
 
 dt = compute_stable_dt()
 
-'''def forward(f, axis):
-    """Forward difference with periodic boundaries."""
-    pad_width = [(0, 0)] * f.ndim
-    pad_width[axis] = (0, 1)
-    f_padded = cp.pad(f, pad_width, mode='constant')
-    hi = [slice(None)] * f.ndim
-    hi[axis] = slice(1, None)
-    return (f_padded[tuple(hi)] - f) / spacing[axis]
-
-
-def backward(f, axis):  
-    """Backward difference with periodic boundaries."""
-    pad_width = [(0, 0)] * f.ndim
-    pad_width[axis] = (1, 0)
-    f_padded = cp.pad(f, pad_width, mode='constant')
-    lo = [slice(None)] * f.ndim
-    lo[axis] = slice(0, -1)
-    return (f - f_padded[tuple(lo)]) / spacing[axis]'''
-
-
 # Fast forward difference with zero-valued boundaries.
 _forward_kernel = cp.ElementwiseKernel(
     'raw T f, int32 side, int32 stride, float64 inv_spacing',
@@ -185,7 +165,6 @@ def step(n):
     tau = t*c/dx
 
     pulse= TemporalBehaviours.packet_burst(tau)
-    #pulse = np.sin(2 * np.pi * 0.08 * tau) * np.exp(-((tau - 9.0) / 3.5)**2) #to revert change, replace tau with t
     J = eps_fixed*c*pulse * J_shape  #to revert change remove eps_fixed and c
 
     # Faraday's law: update B using the current E.

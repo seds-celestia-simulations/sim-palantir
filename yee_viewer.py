@@ -22,7 +22,7 @@ rotation_x, rotation_y = 25.0, 35.0
 paused = False
 step_number = 0
 FIELD_OPACITY = 0.05
-OPACITY_MIN = 0.005
+OPACITY_MIN = 0.025
 OPACITY_MAX = 0.10
 
 SLIDER_X = 20

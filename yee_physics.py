@@ -139,16 +139,14 @@ def add_dynamic_source(shape_name, behaviour_name, axis, position, start_step=0)
     
     current_sources.append({
         "gpu_shape": gpu_shape,
-        "temporal behaviour": beh_func
+        "temporal behaviour": beh_func,
+        "shape_name": shape_name,
+        "axis": axis,
+        "position": position
     })
     
     # Accumulate into the viewer's diagnostic mask
     J_shape += cp.abs(gpu_shape)
-
-
-# Initialize default starting sources
-add_dynamic_source("Dipole", "Packet Burst", 1, (30, 50, 50))
-add_dynamic_source("Dipole", "Packet Burst", 2, (70, 50, 50))
 
 
 def step(n):

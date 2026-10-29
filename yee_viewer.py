@@ -9,6 +9,7 @@ from pygame.locals import *
 from OpenGL.GL import *
 from OpenGL.GLU import gluPerspective, gluProject, gluUnProject
 from OpenGL.GL.shaders import compileProgram, compileShader
+import random
 
 import yee_physics as sim
 print("E type:", type(sim.E))
@@ -25,8 +26,8 @@ OPACITY_MIN = 0.025
 OPACITY_MAX = 0.10
 
 SLIDER_X = 20
-SLIDER_Y = HEIGHT - 132
 SLIDER_HEIGHT = 200
+SLIDER_Y = (HEIGHT + SLIDER_HEIGHT) // 2
 
 # Program state for user input (when placing current sources).
 input_state = {
@@ -50,18 +51,6 @@ value_vbo = None
 # OpenGL buffer, initialized after the window is created.
 field_vbo = None
 
-source_coordinates = np.array([], dtype=np.float32)
-
-def update_source_display():
-    """Updates the spatial mask tracking where sources are for rendering."""
-    global source_coordinates
-    source_strength = cp.sqrt(cp.sum(sim.J_shape**2, axis=0))
-    if source_strength.max() > 0:
-        source_mask_gpu = (source_strength > 0.25 * source_strength.max())
-        source_mask = cp.asnumpy(source_mask_gpu)
-        source_coordinates = np.ascontiguousarray(coordinates[source_mask.ravel()], dtype=np.float32)
-
-update_source_display()
 
 def get_raycast_grid_coordinate(mouse_x, mouse_y):
     """Cast a ray from the mouse position and find its intersection with the simulation grid's Z=0 plane."""
@@ -288,18 +277,55 @@ def draw_field():
 
 
 def draw_source():
-    """Show the source region as bright yellow points."""
-    if len(source_coordinates) == 0:
+    """Draw parametric representations of the current sources."""
+    if not sim.current_sources:
         return
 
-    # Draw on top of the field cloud so the source remains easy to locate.
     glDisable(GL_DEPTH_TEST)
-    glColor3f(1.0, 0.85, 0.1)
-    glEnableClientState(GL_VERTEX_ARRAY)
-    glVertexPointer(3, GL_FLOAT, 0, source_coordinates)
-    glPointSize(7.0)
-    glDrawArrays(GL_POINTS, 0, len(source_coordinates))
-    glDisableClientState(GL_VERTEX_ARRAY)
+    glLineWidth(3.0)
+    glColor3f(1.0, 0.85, 0.1)  # Yellow
+    
+    for src in sim.current_sources:
+        shape = src.get("shape_name")
+        axis = src.get("axis")
+        px, py, pz = src.get("position")
+        
+        # Offset to OpenGL coordinates (center of the cube is 0,0,0)
+        ox, oy, oz = px - sim.N / 2, py - sim.N / 2, pz - sim.N / 2
+        
+        if shape == "Dipole":
+            half_len = 6.0  # Dipole length is 12 grid units
+            glBegin(GL_LINES)
+            if axis == 0:
+                glVertex3f(ox - half_len, oy, oz)
+                glVertex3f(ox + half_len, oy, oz)
+            elif axis == 1:
+                glVertex3f(ox, oy - half_len, oz)
+                glVertex3f(ox, oy + half_len, oz)
+            elif axis == 2:
+                glVertex3f(ox, oy, oz - half_len)
+                glVertex3f(ox, oy, oz + half_len)
+            glEnd()
+            
+        elif shape in ["Current loop", "Current Loop"]:
+            radius = 2.0  # Loop peak magnitude radius
+            segments = 32
+            glBegin(GL_LINE_LOOP)
+            for i in range(segments):
+                theta = 2.0 * np.pi * i / segments
+                c = radius * np.cos(theta)
+                s = radius * np.sin(theta)
+                
+                # Orient the circle perpendicular to the selected axis
+                if axis == 0:
+                    glVertex3f(ox, oy + c, oz + s)
+                elif axis == 1:
+                    glVertex3f(ox + c, oy, oz + s)
+                elif axis == 2:
+                    glVertex3f(ox + c, oy + s, oz)
+            glEnd()
+
+    glLineWidth(1.0)
     glEnable(GL_DEPTH_TEST)
 
 
@@ -376,7 +402,7 @@ def draw_opacity_slider(font):
     glVertex2f(x - 9, knob_y + 5)
     glEnd()
 
-def draw_overlay(font, axis_labels):
+def draw_overlay(small_font, large_font, axis_labels):
     """Draw axis labels and a small legend over the 3D scene."""
     glMatrixMode(GL_PROJECTION)
     glPushMatrix()
@@ -390,28 +416,38 @@ def draw_overlay(font, axis_labels):
 
     # Labels follow the positive ends of the rotated 3D axes.
     for x, y, label, color in axis_labels:
-        draw_text(font, x, y, label, color)
+        draw_text(small_font, x, y, label, color)
 
-    # Legend: screen-space text remains fixed while the scene rotates.
-    draw_text(font, 15, HEIGHT - 53, "Yellow points: current-source region", (255, 220, 70))
-    draw_text(font, 15, HEIGHT - 78, "Ey field: red positive, blue negative")
-    draw_text(font, 15, 18, "Drag: rotate | Wheel: zoom | Space: pause | Esc: quit")
-    draw_opacity_slider(font)
+    # Legend: Moved from the top-left corner to the bottom-left
+    draw_text(small_font, 15, 68, "Yellow points: current-source region", (255, 220, 70))
+    draw_text(small_font, 15, 43, "Ey field: red positive, blue negative")
+    draw_text(small_font, 15, 18, "Drag: rotate | Wheel: zoom | Space: pause | Esc: quit")
+    draw_opacity_slider(small_font)
 
-
-    prompt_color = (255, 230, 100)
-    prompt_y = HEIGHT - 110
+    prompt_color = (255, 230, 80)
+    prompt_y = HEIGHT - 60  # Moved up above the simulation cube
     
+    prompt_text = None
     if input_state["stage"] == 0:
-        draw_text(font, 15, prompt_y, "Press 'N' to configure a new source")
+        prompt_text = "Press 'N' to configure a new source"
     elif input_state["stage"] == 1:
-        draw_text(font, 15, prompt_y, "Select current source shape: [1] Vortex Loop   [2] Dipole", prompt_color)
+        prompt_text = "Select current source shape: [1] Current Loop   [2] Dipole"
     elif input_state["stage"] == 2:
-        draw_text(font, 15, prompt_y, "Select current source behaviour: [1] Gaussian Pulse   [2] Continuous Wave   [3] Packet Burst", prompt_color)
+        # Shortened string to prevent the width from exceeding the 1000px window
+        prompt_text = "Select behaviour: [1] Gaussian Pulse  [2] Continuous Wave  [3] Packet Burst"
     elif input_state["stage"] == 3:
-        draw_text(font, 15, prompt_y, "Select current source orientation direction: [1] X   [2] Y   [3] Z", prompt_color)
-    elif input_state["stage"] == 4:
-        draw_text(font, 15, prompt_y, "Click anywhere on the simulation grid to place the source.", (100, 255, 100))
+        if input_state["shape"] == "Current loop": 
+            prompt_text = "Select orientation direction: [1] X   [3] Z"
+        else: 
+            prompt_text = "Select orientation direction: [1] X   [2] Y   [3] Z"
+
+    if prompt_text:
+        # Calculate horizontal centering and clamp to 0 to prevent OpenGL culling
+        text_surface = large_font.render(prompt_text, True, (255, 255, 255))
+        prompt_x = max(0, (WIDTH - text_surface.get_width()) // 2)
+        
+        # Render centered prompt
+        draw_text(large_font, prompt_x, prompt_y, prompt_text, prompt_color)
 
     glEnable(GL_DEPTH_TEST)
     glPopMatrix()
@@ -474,12 +510,35 @@ def initialize_field_renderer():
 
     glBindBuffer(GL_ARRAY_BUFFER, 0)
 
+
+def get_random_valid_position(padding=10, min_dist=15.0):
+    """Generate a random (x,y,z) coordinate avoiding boundaries and existing sources."""
+    while True:
+        # Constraint 1: Don't cross the simulation boundary
+        x = random.randint(padding, sim.N - padding)
+        y = random.randint(padding, sim.N - padding)
+        z = random.randint(padding, sim.N - padding)
+        
+        # Constraint 2: Don't overlap with pre-existing sources
+        overlap = False
+        for src in sim.current_sources:
+            sx, sy, sz = src["position"]
+            dist = ((x - sx)**2 + (y - sy)**2 + (z - sz)**2)**0.5
+            if dist < min_dist:
+                overlap = True
+                break
+                
+        if not overlap:
+            return (x, y, z)
+
+
 def main():
     """Run the interactive 3D viewer."""
     global camera_distance, rotation_x, rotation_y, paused, step_number, field_vbo
 
     pygame.init()
-    font = pygame.font.Font(None, 23)
+    small_font = pygame.font.Font(None, 23)
+    large_font = pygame.font.Font(None, 34)
     pygame.display.set_caption("3D Yee FDTD | Ey field and source")
     pygame.display.set_mode((WIDTH, HEIGHT), DOUBLEBUF | OPENGL)
     initialize_field_renderer()
@@ -514,7 +573,7 @@ def main():
                 
                 elif input_state["stage"] == 1:
                     if event.key == K_1:
-                        input_state["shape"] = "Vortex Loop"
+                        input_state["shape"] = "Current loop"  # Change capital 'L' to lowercase 'l'
                         input_state["stage"] = 2
                     elif event.key == K_2:
                         input_state["shape"] = "Dipole"
@@ -534,41 +593,35 @@ def main():
                 elif input_state["stage"] == 3:
                     if event.key == K_1:
                         input_state["axis"] = 0
-                        input_state["stage"] = 4
-                    elif event.key == K_2:
+                    elif event.key == K_2 and input_state["shape"] != "Current loop": # Since the renderer checks E_y, a ring with a vertical axis appears to emit nothing. If we change the renderer to check |E| instead of E_y, we stop seeing different colours for different half cycles (since |E| is always positive).
                         input_state["axis"] = 1
-                        input_state["stage"] = 4
                     elif event.key == K_3:
                         input_state["axis"] = 2
-                        input_state["stage"] = 4
+                    
+                    if event.key in (K_1, K_3) or (event.key == K_2 and input_state["shape"] == "Dipole"):
+                        # Generate random valid position
+                        target_coord = get_random_valid_position()
+                        
+                        # Add new active source
+                        sim.add_dynamic_source(
+                            input_state["shape"],
+                            input_state["behaviour"],
+                            input_state["axis"],
+                            target_coord,
+                            step_number
+                        )
+                        
+                        # Reset input state
+                        input_state["stage"] = 0
+                        input_state["shape"] = None
+                        input_state["behaviour"] = None
+                        input_state["axis"] = None
 
             elif event.type == MOUSEBUTTONDOWN:
                 if event.button == 1:
                     opacity_dragging = mouse_over_opacity_slider(event.pos)
                     if opacity_dragging:
                         update_opacity_from_mouse(event.pos[1])
-
-                    elif input_state["stage"] == 4:
-                        mouse_x, mouse_y = event.pos
-                        target_coord = get_raycast_grid_coordinate(mouse_x, mouse_y)
-                        
-                        # Add new active source locally to the simulation engine
-                        sim.add_dynamic_source(
-                            input_state["shape"],
-                            input_state["behaviour"],
-                            input_state["axis"],
-                            target_coord,
-                            step_number  # Pass the current step number here
-                        )
-
-                        # Refresh the buffer coordinates for drawing the source location
-                        update_source_display()
-                        
-                        # Reset input state to exit placement mode
-                        input_state["stage"] = 0
-                        input_state["shape"] = None
-                        input_state["behaviour"] = None
-                        input_state["axis"] = None
 
                 elif event.button == 4:
                     camera_distance = max(35, camera_distance - 4)
@@ -620,7 +673,7 @@ def main():
         draw_box(sim.N)
         draw_source()
         draw_axes(sim.N)
-        draw_overlay(font, projected_axis_labels(sim.N))
+        draw_overlay(small_font, large_font, projected_axis_labels(sim.N))
 
         pygame.display.flip()
 

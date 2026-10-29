@@ -84,13 +84,11 @@ class SourceShapes:
                 r_perpendicular_2 = y - source_y
         half_dipole_length = dipole_length / 2.0
         
-        # Tightened transverse spread (/ 0.1) renders the dipole as a clean, straight line filament.
         J_shape[axis] = maximum_signal_strength * np.exp(-(r_perpendicular_1 ** 2 + r_perpendicular_2 ** 2) / 0.1) * np.where(
             np.abs(r_parallel) <= half_dipole_length,
             0.5 * (1.0 + np.cos(np.pi * r_parallel / half_dipole_length)),
             0.0
         )
-
         return J_shape
 
 

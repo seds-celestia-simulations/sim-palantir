@@ -7,16 +7,15 @@ import time
 from ctypes import c_void_p
 from pygame.locals import *
 from OpenGL.GL import *
-from OpenGL.GLU import gluPerspective, gluProject
+from OpenGL.GLU import gluPerspective, gluProject, gluUnProject
 from OpenGL.GL.shaders import compileProgram, compileShader
 
 import yee_physics as sim
 print("E type:", type(sim.E))
 print("E device:", sim.E.device)
-print("Source type:", type(sim.J_shape))
 
 # Window and camera settings.
-WIDTH, HEIGHT = 1000,800
+WIDTH, HEIGHT = 1000, 800
 camera_distance = 200.0
 rotation_x, rotation_y = 25.0, 35.0
 paused = False
@@ -29,11 +28,19 @@ SLIDER_X = 20
 SLIDER_Y = HEIGHT - 132
 SLIDER_HEIGHT = 200
 
+# Program state for user input (when placing current sources).
+input_state = {
+    "stage": 0,
+    "shape": None,
+    "behaviour": None,
+    "axis": None
+}
 
 # Grid coordinates centered on the simulation's source.
 coordinates = np.indices((sim.N, sim.N, sim.N), dtype=np.float32)
 coordinates = coordinates.reshape(3, -1).T
 coordinates -= sim.N / 2
+
 # Keep a copy of the coordinate array on the GPU.
 gpu_coordinates = cp.asarray(coordinates, dtype=cp.float32)
 shader_program = None
@@ -43,11 +50,53 @@ value_vbo = None
 # OpenGL buffer, initialized after the window is created.
 field_vbo = None
 
-# Mark the spatial region occupied by the current source.
-source_strength = cp.sqrt(cp.sum(sim.J_shape**2, axis=0))
-source_mask_gpu = (source_strength > 0.25 * source_strength.max())
-source_mask = cp.asnumpy(source_mask_gpu)
-source_coordinates = np.ascontiguousarray(coordinates[source_mask.ravel()], dtype=np.float32)
+source_coordinates = np.array([], dtype=np.float32)
+
+def update_source_display():
+    """Updates the spatial mask tracking where sources are for rendering."""
+    global source_coordinates
+    source_strength = cp.sqrt(cp.sum(sim.J_shape**2, axis=0))
+    if source_strength.max() > 0:
+        source_mask_gpu = (source_strength > 0.25 * source_strength.max())
+        source_mask = cp.asnumpy(source_mask_gpu)
+        source_coordinates = np.ascontiguousarray(coordinates[source_mask.ravel()], dtype=np.float32)
+
+update_source_display()
+
+def get_raycast_grid_coordinate(mouse_x, mouse_y):
+    """Cast a ray from the mouse position and find its intersection with the simulation grid's Z=0 plane."""
+    modelview = glGetDoublev(GL_MODELVIEW_MATRIX)
+    projection = glGetDoublev(GL_PROJECTION_MATRIX)
+    viewport = glGetIntegerv(GL_VIEWPORT)
+    
+    # OpenGL's Y axis starts from the bottom, Pygame's starts from the top.
+    opengl_y = viewport[3] - mouse_y
+    
+    # Get the 3D points at the near and far clipping planes
+    near_point = gluUnProject(mouse_x, opengl_y, 0.0, modelview, projection, viewport)
+    far_point = gluUnProject(mouse_x, opengl_y, 1.0, modelview, projection, viewport)
+    
+    # Calculate the ray direction vector
+    direction = np.array(far_point) - np.array(near_point)
+    direction /= np.linalg.norm(direction)
+    
+    # For a 3D grid, calculate intersection with the local Z=0 plane (center of the cube).
+    if direction[2] != 0:
+        t = -near_point[2] / direction[2]
+        intersection = np.array(near_point) + t * direction
+        
+        # Offset back to grid indices (0 to N)
+        grid_x = int(round(intersection[0] + sim.N / 2))
+        grid_y = int(round(intersection[1] + sim.N / 2))
+        grid_z = int(sim.N / 2) # Intersected the Z=0 slice
+        
+        # Clamp to bounds
+        grid_x = max(0, min(sim.N - 1, grid_x))
+        grid_y = max(0, min(sim.N - 1, grid_y))
+        
+        return (grid_x, grid_y, grid_z)
+    
+    return (sim.N // 2, sim.N // 2, sim.N // 2)
 
 
 def draw_box(size):
@@ -114,13 +163,10 @@ def draw_axes(size):
 
 VERTEX_SHADER = """
 #version 120
-
 attribute vec3 a_position;
 attribute float a_field;
-
 uniform float u_peak;
 uniform float u_threshold;
-
 varying vec3 v_color;
 varying float v_strength;
 
@@ -133,37 +179,29 @@ void main()
     if (strength <= u_threshold) {
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     } else {
-        gl_Position = gl_ModelViewProjectionMatrix
-                      * vec4(a_position, 1.0);
+        gl_Position = gl_ModelViewProjectionMatrix * vec4(a_position, 1.0);
     }
 
-    // Preserve your original positive/negative colours.
     if (a_field >= 0.0) {
-    v_color = vec3(1.0, 0.05, 0.0);  // Positive: Red
-    }
-    else {
-    v_color = vec3(0.0, 0.05, 1.0);  // Negative: Blue
+        v_color = vec3(1.0, 0.05, 0.0);  // Positive: Red
+    } else {
+        v_color = vec3(0.0, 0.05, 1.0);  // Negative: Blue
     }
 }
 """
 
 FRAGMENT_SHADER = """
 #version 120
-
 varying vec3 v_color;
 varying float v_strength;
-
 uniform float u_opacity;
 
 void main()
 {
     float alpha = u_opacity * sqrt(v_strength);
-
     gl_FragColor = vec4(v_color, alpha);
 }
 """
-
-
 
 def draw_field():
     # Calculate field peak on CUDA.
@@ -198,7 +236,7 @@ def draw_field():
         0.01
     )
     glUniform1f(
-    glGetUniformLocation(shader_program, "u_opacity"),
+        glGetUniformLocation(shader_program, "u_opacity"),
         FIELD_OPACITY
     )
 
@@ -239,8 +277,6 @@ def draw_field():
     glDepthMask(GL_TRUE)
     glEnable(GL_DEPTH_TEST)
     glDisable(GL_BLEND)
-    '''glPointSize(4.0)
-    glDrawArrays(GL_POINTS, 0, sim.N**3)'''
 
     glDisableVertexAttribArray(position_location)
     glDisableVertexAttribArray(field_location)
@@ -357,18 +393,31 @@ def draw_overlay(font, axis_labels):
         draw_text(font, x, y, label, color)
 
     # Legend: screen-space text remains fixed while the scene rotates.
-    draw_text(font, 15, HEIGHT - 28, "Axes: X red   Y green   Z blue")
     draw_text(font, 15, HEIGHT - 53, "Yellow points: current-source region", (255, 220, 70))
     draw_text(font, 15, HEIGHT - 78, "Ey field: red positive, blue negative")
     draw_text(font, 15, 18, "Drag: rotate | Wheel: zoom | Space: pause | Esc: quit")
     draw_opacity_slider(font)
+
+
+    prompt_color = (255, 230, 100)
+    prompt_y = HEIGHT - 110
+    
+    if input_state["stage"] == 0:
+        draw_text(font, 15, prompt_y, "Press 'N' to configure a new source")
+    elif input_state["stage"] == 1:
+        draw_text(font, 15, prompt_y, "Select current source shape: [1] Vortex Loop   [2] Dipole", prompt_color)
+    elif input_state["stage"] == 2:
+        draw_text(font, 15, prompt_y, "Select current source behaviour: [1] Gaussian Pulse   [2] Continuous Wave   [3] Packet Burst", prompt_color)
+    elif input_state["stage"] == 3:
+        draw_text(font, 15, prompt_y, "Select current source orientation direction: [1] X   [2] Y   [3] Z", prompt_color)
+    elif input_state["stage"] == 4:
+        draw_text(font, 15, prompt_y, "Click anywhere on the simulation grid to place the source.", (100, 255, 100))
 
     glEnable(GL_DEPTH_TEST)
     glPopMatrix()
     glMatrixMode(GL_PROJECTION)
     glPopMatrix()
     glMatrixMode(GL_MODELVIEW)
-
 
 def projected_axis_labels(size):
     """Project X, Y, and Z labels near the positive ends of the edge axes."""
@@ -388,7 +437,6 @@ def projected_axis_labels(size):
         if 0 <= x < WIDTH and 0 <= y < HEIGHT and 0 <= depth <= 1:
             labels.append((x + 5, y + 5, label, color))
     return labels
-
 
 def initialize_field_renderer():
     global shader_program, position_vbo, value_vbo
@@ -426,11 +474,9 @@ def initialize_field_renderer():
 
     glBindBuffer(GL_ARRAY_BUFFER, 0)
 
-
 def main():
     """Run the interactive 3D viewer."""
     global camera_distance, rotation_x, rotation_y, paused, step_number, field_vbo
-
 
     pygame.init()
     font = pygame.font.Font(None, 23)
@@ -449,14 +495,11 @@ def main():
     glClearColor(0.035, 0.04, 0.055, 1.0)
 
     clock = pygame.time.Clock()
-    dragging = False
     opacity_dragging = False
-    last_mouse = (0, 0)
     running = True
 
     while running:
         for event in pygame.event.get():
-
             if event.type == QUIT:
                 running = False
 
@@ -465,23 +508,74 @@ def main():
                     running = False
                 elif event.key == K_SPACE:
                     paused = not paused
+                
+                elif input_state["stage"] == 0 and event.key == K_n:
+                    input_state["stage"] = 1
+                
+                elif input_state["stage"] == 1:
+                    if event.key == K_1:
+                        input_state["shape"] = "Vortex Loop"
+                        input_state["stage"] = 2
+                    elif event.key == K_2:
+                        input_state["shape"] = "Dipole"
+                        input_state["stage"] = 2
+                
+                elif input_state["stage"] == 2:
+                    if event.key == K_1:
+                        input_state["behaviour"] = "Gaussian Pulse"
+                        input_state["stage"] = 3
+                    elif event.key == K_2:
+                        input_state["behaviour"] = "Continuous Wave"
+                        input_state["stage"] = 3
+                    elif event.key == K_3:
+                        input_state["behaviour"] = "Packet Burst"
+                        input_state["stage"] = 3
+                
+                elif input_state["stage"] == 3:
+                    if event.key == K_1:
+                        input_state["axis"] = 0
+                        input_state["stage"] = 4
+                    elif event.key == K_2:
+                        input_state["axis"] = 1
+                        input_state["stage"] = 4
+                    elif event.key == K_3:
+                        input_state["axis"] = 2
+                        input_state["stage"] = 4
 
             elif event.type == MOUSEBUTTONDOWN:
-
                 if event.button == 1:
                     opacity_dragging = mouse_over_opacity_slider(event.pos)
-
                     if opacity_dragging:
                         update_opacity_from_mouse(event.pos[1])
 
+                    elif input_state["stage"] == 4:
+                        mouse_x, mouse_y = event.pos
+                        target_coord = get_raycast_grid_coordinate(mouse_x, mouse_y)
+                        
+                        # Add new active source locally to the simulation engine
+                        sim.add_dynamic_source(
+                            input_state["shape"],
+                            input_state["behaviour"],
+                            input_state["axis"],
+                            target_coord,
+                            step_number  # Pass the current step number here
+                        )
+
+                        # Refresh the buffer coordinates for drawing the source location
+                        update_source_display()
+                        
+                        # Reset input state to exit placement mode
+                        input_state["stage"] = 0
+                        input_state["shape"] = None
+                        input_state["behaviour"] = None
+                        input_state["axis"] = None
+
                 elif event.button == 4:
                     camera_distance = max(35, camera_distance - 4)
-
                 elif event.button == 5:
                     camera_distance = min(180, camera_distance + 4)
 
             elif event.type == MOUSEBUTTONUP:
-
                 if event.button == 1:
                     opacity_dragging = False
 
@@ -492,11 +586,9 @@ def main():
                     if opacity_dragging:
                         # Move the slider vertically.
                         update_opacity_from_mouse(event.pos[1])
-
                     else:
                         # Rotate the cube.
                         dx_mouse, dy_mouse = event.rel
-
                         rotation_y += dx_mouse * 0.5
                         rotation_x += dy_mouse * 0.5
 
@@ -514,10 +606,6 @@ def main():
             cp.cuda.get_current_stream().synchronize()
             physics_ms = (time.perf_counter() - start) * 1000
             step_number += 1
-
-        '''if not paused:
-            sim.step(step_number)
-            step_number += 1'''
 
         render_start = time.perf_counter()
 
@@ -548,24 +636,8 @@ def main():
                 f"FPS: {clock.get_fps():.1f}"
             )
 
-        '''glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        glMatrixMode(GL_MODELVIEW)
-        glLoadIdentity()
-        glTranslatef(0, 0, -camera_distance)
-        glRotatef(rotation_x, 1, 0, 0)
-        glRotatef(rotation_y, 0, 1, 0)
-
-        draw_box(sim.N)
-        draw_field()
-        draw_source()
-        draw_axes(sim.N)
-        draw_overlay(font, projected_axis_labels(sim.N))
-
-        pygame.display.flip()
-        clock.tick(60)'''
     glDeleteBuffers(1, [field_vbo])
     pygame.quit()
-
 
 if __name__ == "__main__":
     main()

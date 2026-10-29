@@ -1,14 +1,17 @@
 """Minimal 3D Yee-FDTD physics, with no visualization."""
 
+
 import numpy as np
 import cupy as cp
-import math
-import sources
-from sources import TemporalBehaviours
 
-eps_fixed = 8.854*(10**(-12))  # Vacuum permittivity (F/m)
-mu_fixed = 1.257*(10**(-6))  # Vacuum permeability (H/m)
-c = 1.0 / math.sqrt(eps_fixed * mu_fixed)
+from math import sqrt
+
+import sources
+
+
+eps_fixed = 8.854 * 10e-12  # Vacuum permittivity (F/m)
+mu_fixed = 1.257 * 10e-6  # Vacuum permeability (H/m)
+c = 1.0 / sqrt(eps_fixed * mu_fixed)
 N = 100
 dx = dy = dz = 0.5
 spacing = (dx, dy, dz)
@@ -16,7 +19,7 @@ spacing = (dx, dy, dz)
 # Each field is one array: [component, x, y, z].
 E = cp.zeros((3, N, N, N))  # Ex, Ey, Ez
 B = cp.zeros((3, N, N, N))  # Bx, By, Bz
-eps= cp.full_like(E, eps_fixed)
+eps = cp.full_like(E, eps_fixed)
 mu = cp.full_like(B, mu_fixed) 
 
 def compute_stable_dt(safety=0.85):
@@ -28,8 +31,8 @@ def compute_stable_dt(safety=0.85):
     mu_min = float(cp.min(mu).item())
     if eps_min <= 0 or mu_min <= 0:
         raise ValueError("This basic FDTD solver requires epsilon > 0 and mu > 0")
-    vmax = 1.0 / math.sqrt(eps_min * mu_min)
-    return safety / (vmax * math.sqrt(dx**-2 + dy**-2 + dz**-2))
+    vmax = 1.0 / sqrt(eps_min * mu_min)
+    return safety / (vmax * sqrt(dx**-2 + dy**-2 + dz**-2))
 
 dt = compute_stable_dt()
 
@@ -77,7 +80,6 @@ def forward(f, axis):
     )
     return out
 
-
 def backward(f, axis):
     """Backward difference without allocating padded arrays."""
     out = cp.empty_like(f)
@@ -90,31 +92,6 @@ def backward(f, axis):
     )
     return out
 
-test = cp.arange(125, dtype=cp.float64).reshape(5, 5, 5)
-
-for axis in range(3):
-    pad_f = [(0, 0)] * 3
-    pad_f[axis] = (0, 1)
-
-    old_forward = cp.diff(
-        cp.pad(test, pad_f, mode="constant"),
-        axis=axis
-    ) / spacing[axis]
-
-    pad_b = [(0, 0)] * 3
-    pad_b[axis] = (1, 0)
-
-    old_backward = cp.diff(
-        cp.pad(test, pad_b, mode="constant"),
-        axis=axis
-    ) / spacing[axis]
-
-    print(
-        f"Axis {axis}:",
-        bool(cp.allclose(forward(test, axis), old_forward).item()),
-        bool(cp.allclose(backward(test, axis), old_backward).item())
-    )
-
 def curl(F, difference):
     """Calculate the three components of curl(F)."""
     Fx, Fy, Fz = F
@@ -124,37 +101,54 @@ def curl(F, difference):
         difference(Fy, 0) - difference(Fx, 1),
     ])
 
-
 def divergence(F, difference):
     """Calculate the discrete divergence of F."""
     return sum(difference(F[a], a) for a in range(3))
 
+# Dynamic Sources Collection
+current_sources = []
+J_shape = cp.zeros((3, N, N, N), dtype=cp.float64) # Global shape mask for the viewer
 
-current_sources = (
-    {
-        "source shape": sources.SourceShapes.dipole(
-            axis = 1,
-            room_length = N,
-            source_position = (30, 50, 50)
-        ),
-        "temporal behaviour": lambda t: sources.TemporalBehaviours.packet_burst(t)
-    },
-    {
-        "source shape": sources.SourceShapes.dipole(
-            axis = 2,
-            room_length = N,
-            source_position = (70, 50, 50),
-        ),
-        "temporal behaviour": lambda t: sources.TemporalBehaviours.packet_burst(t)
-    }
-)
+def add_dynamic_source(shape_name, behaviour_name, axis, position, start_step=0):
+    """Injects a new dynamic source into the simulation."""
+    global J_shape, current_sources
+    
+    # Calculate the time offset for this specific source
+    start_t = (start_step + 0.5) * dt
+    start_tau = start_t * c / dx
+    
+    # Generate Spatial Array
+    if shape_name == "Vortex Loop":
+        shape_arr = sources.SourceShapes.vortex_loop(dx=dx, axis=axis, room_length=N, source_position=position)
+    elif shape_name == "Dipole":
+        shape_arr = sources.SourceShapes.dipole(axis=axis, room_length=N, source_position=position)
+    else:
+        return
+        
+    # Generate Temporal Lambda with time offset applied
+    if behaviour_name == "Gaussian Pulse":
+        beh_func = lambda t: sources.TemporalBehaviours.gaussian_pulse(t - start_tau)
+    elif behaviour_name == "Continuous Wave":
+        beh_func = lambda t: sources.TemporalBehaviours.continuous_wave(t - start_tau)
+    elif behaviour_name == "Packet Burst":
+        beh_func = lambda t: sources.TemporalBehaviours.packet_burst(t - start_tau)
+    else:
+        return
+        
+    gpu_shape = cp.asarray(shape_arr)
+    
+    current_sources.append({
+        "gpu_shape": gpu_shape,
+        "temporal behaviour": beh_func
+    })
+    
+    # Accumulate into the viewer's diagnostic mask
+    J_shape += cp.abs(gpu_shape)
 
 
-J_shape_cpu = np.zeros((3, N, N, N))
-for current_source in current_sources: 
-    J_shape_cpu += current_source["source shape"]
-J_shape = cp.asarray(J_shape_cpu) # Move to GPU ONCE
-del J_shape_cpu
+# Initialize default starting sources
+add_dynamic_source("Dipole", "Packet Burst", 1, (30, 50, 50))
+add_dynamic_source("Dipole", "Packet Burst", 2, (70, 50, 50))
 
 
 def step(n):
@@ -162,10 +156,12 @@ def step(n):
     global E, B, H
 
     t = (n + 0.5) * dt
-    tau = t*c/dx
+    tau = t * c / dx
 
-    pulse= TemporalBehaviours.packet_burst(tau)
-    J = eps_fixed*c*pulse * J_shape  #to revert change remove eps_fixed and c
+    J = cp.zeros_like(E)
+    for src in current_sources:
+        pulse = src["temporal behaviour"](tau)
+        J += eps_fixed * c * pulse * src["gpu_shape"]
 
     # Faraday's law: update B using the current E.
     B -= dt * curl(E, forward)
@@ -176,11 +172,10 @@ def step(n):
 
 def check_constraints():
     """Return the divergence diagnostics used by the original script."""
-    #div_e = np.max(np.abs(divergence(E, backward)))
     div_e = cp.max(cp.abs(divergence(eps*E, backward)))
     div_b = cp.max(cp.abs(divergence(B, forward)))
     div_j = cp.max(cp.abs(divergence(J_shape, backward)))
-    return(
+    return (
         float(div_e.item()),
         float(div_b.item()), 
         float(div_j.item())

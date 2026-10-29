@@ -429,7 +429,7 @@ def draw_overlay(small_font, large_font, axis_labels):
     
     prompt_text = None
     if input_state["stage"] == 0:
-        prompt_text = "Press 'N' to configure a new source"
+        prompt_text = "Press 'N' to add a new source"
     elif input_state["stage"] == 1:
         prompt_text = "Select current source shape: [1] Current Loop   [2] Dipole"
     elif input_state["stage"] == 2:

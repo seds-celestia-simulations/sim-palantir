@@ -128,8 +128,8 @@ def add_dynamic_source(shape_name, behaviour_name, axis, position, start_step=0)
     # Generate Temporal Lambda with time offset applied
     if behaviour_name == "Gaussian Pulse":
         beh_func = lambda t: sources.TemporalBehaviours.gaussian_pulse(t - start_tau)
-    elif behaviour_name == "Continuous Wave":
-        beh_func = lambda t: sources.TemporalBehaviours.continuous_wave(t - start_tau)
+    elif behaviour_name == "Ramped-up Sine":
+        beh_func = lambda t: sources.TemporalBehaviours.ramped_up_sine(t - start_tau)
     elif behaviour_name == "Packet Burst":
         beh_func = lambda t: sources.TemporalBehaviours.packet_burst(t - start_tau)
     else:

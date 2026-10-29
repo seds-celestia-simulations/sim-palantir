@@ -434,7 +434,7 @@ def draw_overlay(small_font, large_font, axis_labels):
         prompt_text = "Select current source shape: [1] Current Loop   [2] Dipole"
     elif input_state["stage"] == 2:
         # Shortened string to prevent the width from exceeding the 1000px window
-        prompt_text = "Select behaviour: [1] Gaussian Pulse  [2] Continuous Wave  [3] Packet Burst"
+        prompt_text = "Select behaviour: [1] Gaussian Pulse  [2] Ramped-up Sine  [3] Packet Burst"
     elif input_state["stage"] == 3:
         if input_state["shape"] == "Current loop": 
             prompt_text = "Select orientation direction: [1] X   [3] Z"
@@ -584,7 +584,7 @@ def main():
                         input_state["behaviour"] = "Gaussian Pulse"
                         input_state["stage"] = 3
                     elif event.key == K_2:
-                        input_state["behaviour"] = "Continuous Wave"
+                        input_state["behaviour"] = "Ramped-up Sine"
                         input_state["stage"] = 3
                     elif event.key == K_3:
                         input_state["behaviour"] = "Packet Burst"

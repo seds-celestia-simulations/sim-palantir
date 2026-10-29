@@ -118,7 +118,7 @@ class TemporalBehaviours:
         return np.sin(angular_frequency * t + initial_phase) * np.exp(-((t - start_time) / standard_deviation) ** 2)
 
     @staticmethod
-    def continuous_wave(
+    def ramped_up_sine(
         t: float,
         time_constant: float = 5.0,
         initial_phase: float = 0.0,

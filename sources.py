@@ -8,14 +8,14 @@ class SourceShapes:
     """Spatial arrangements for the current source. (values of J_shape)"""
 
     @staticmethod
-    def vortex_loop(
+    def current_loop(
         dx: float,
         axis: int,
         room_length: int,
         source_position: tuple[int, int, int] | None = None,
         maximum_signal_strength: float = 10.0
     ) -> NDArray[np.float64]:
-        """A vortex current loop oriented along one of the coordinate axes.
+        """A circular current loop oriented along one of the coordinate axes.
 
         Args:
             dx: The length of one grid cell in the simulation

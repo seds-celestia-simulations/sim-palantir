@@ -1,7 +1,6 @@
 """Minimal 3D Yee-FDTD physics, with no visualization."""
 
 
-import numpy as np
 import cupy as cp
 
 from math import sqrt
@@ -11,16 +10,17 @@ import sources
 
 eps_fixed = 8.854 * 10e-12  # Vacuum permittivity (F/m)
 mu_fixed = 1.257 * 10e-6  # Vacuum permeability (H/m)
-c = 1.0 / sqrt(eps_fixed * mu_fixed)
+
 N = 100
 dx = dy = dz = 0.5
 spacing = (dx, dy, dz)
 
-# Each field is one array: [component, x, y, z].
 E = cp.zeros((3, N, N, N))  # Ex, Ey, Ez
 B = cp.zeros((3, N, N, N))  # Bx, By, Bz
 eps = cp.full_like(E, eps_fixed)
 mu = cp.full_like(B, mu_fixed) 
+c = 1.0 / sqrt(eps_fixed * mu_fixed)
+
 
 def compute_stable_dt(safety=0.85):
     """Conservative CFL step for positive, linear isotropic epsilon/mu maps."""
@@ -118,8 +118,8 @@ def add_dynamic_source(shape_name, behaviour_name, axis, position, start_step=0)
     start_tau = start_t * c / dx
     
     # Generate Spatial Array
-    if shape_name == "Vortex Loop":
-        shape_arr = sources.SourceShapes.vortex_loop(dx=dx, axis=axis, room_length=N, source_position=position)
+    if shape_name == "Current loop":
+        shape_arr = sources.SourceShapes.current_loop(dx=dx, axis=axis, room_length=N, source_position=position)
     elif shape_name == "Dipole":
         shape_arr = sources.SourceShapes.dipole(axis=axis, room_length=N, source_position=position)
     else:

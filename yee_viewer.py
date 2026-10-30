@@ -21,9 +21,10 @@ camera_distance = 200.0
 rotation_x, rotation_y = 25.0, 35.0
 paused = False
 step_number = 0
-FIELD_OPACITY = 0.05
+FIELD_OPACITY = 0.065
 OPACITY_MIN = 0.025
 OPACITY_MAX = 0.10
+display_peak = 1e-12
 
 SLIDER_X = 20
 SLIDER_HEIGHT = 200
@@ -200,6 +201,132 @@ def draw_axes(size):
     glEnable(GL_DEPTH_TEST)
 
 
+
+def draw_room_tiles(size, tile_size=10):
+    """Draw six tiled faces with camera-dependent transparency."""
+    h = size / 2.0
+    count = max(1, int(np.ceil(size / tile_size)))
+    tile = size / count
+
+    surface_offset = 0.05
+    line_offset = 0.08
+
+    # Direction from the cube centre toward the camera,
+    # expressed in the cube's local coordinates.
+    rx = np.radians(rotation_x)
+    ry = np.radians(rotation_y)
+
+    camera_dir = np.array([
+        -np.sin(ry) * np.cos(rx),
+        np.sin(rx),
+        np.cos(ry) * np.cos(rx)
+    ])
+
+    # (outward normal, U direction, V direction, base colour)
+    faces = [
+        # Floor and ceiling
+        ((0, -1, 0), (1, 0, 0), (0, 0, 1), (0.16, 0.18, 0.21)),
+        ((0,  1, 0), (1, 0, 0), (0, 0, 1), (0.16, 0.18, 0.21)),
+
+        # Back and front walls
+        ((0, 0, -1), (1, 0, 0), (0, 1, 0), (0.12, 0.14, 0.18)),
+        ((0, 0,  1), (1, 0, 0), (0, 1, 0), (0.12, 0.14, 0.18)),
+
+        # Right and left walls
+        (( 1, 0, 0), (0, 1, 0), (0, 0, 1), (0.14, 0.16, 0.20)),
+        ((-1, 0, 0), (0, 1, 0), (0, 0, 1), (0.14, 0.16, 0.20))
+    ]
+
+    def facing(face):
+        return float(np.dot(face[0], camera_dir))
+
+    def vertex(normal, u_axis, v_axis, u, v, inset):
+        return tuple(
+            normal[k] * (h - inset)
+            + u_axis[k] * u
+            + v_axis[k] * v
+            for k in range(3)
+        )
+
+    # Draw the opaque faces first, then the transparent faces.
+    # Transparent faces are drawn back-to-front.
+    opaque_faces = [f for f in faces if facing(f) <= 0]
+    transparent_faces = sorted(
+        [f for f in faces if facing(f) > 0],
+        key=facing
+    )
+
+    for face in opaque_faces + transparent_faces:
+        normal, u_axis, v_axis, base_color = face
+
+        # A face becomes transparent as it turns toward the camera.
+        visibility = max(0.0, facing(face))
+        alpha = 1.0 - 0.85 * min(1.0, 3.0 * visibility)
+
+        if alpha < 1.0:
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+            glDepthMask(GL_FALSE)
+        else:
+            glDisable(GL_BLEND)
+            glDepthMask(GL_TRUE)
+
+        # Draw tiled surfaces.
+        glBegin(GL_QUADS)
+
+        for i in range(count):
+            for j in range(count):
+                a = -h + i * tile
+                b = -h + j * tile
+
+                shade = 0.015 if (i + j) % 2 else 0.0
+
+                glColor4f(
+                    base_color[0] + shade,
+                    base_color[1] + shade,
+                    base_color[2] + shade,
+                    alpha
+                )
+
+                for u, v in [
+                    (a, b),
+                    (a + tile, b),
+                    (a + tile, b + tile),
+                    (a, b + tile)
+                ]:
+                    glVertex3fv(
+                        vertex(normal, u_axis, v_axis,
+                               u, v, surface_offset)
+                    )
+
+        glEnd()
+
+        # Draw grout lines, respecting face transparency.
+        glColor4f(0.28, 0.30, 0.34, alpha)
+        glLineWidth(1.0)
+        glBegin(GL_LINES)
+
+        for i in range(count + 1):
+            p = -h + i * tile
+
+            glVertex3fv(vertex(normal, u_axis, v_axis,
+                                p, -h, line_offset))
+            glVertex3fv(vertex(normal, u_axis, v_axis,
+                                p, h, line_offset))
+
+            glVertex3fv(vertex(normal, u_axis, v_axis,
+                                -h, p, line_offset))
+            glVertex3fv(vertex(normal, u_axis, v_axis,
+                                h, p, line_offset))
+
+        glEnd()
+
+    # Restore OpenGL state for the rest of the viewer.
+    glDepthMask(GL_TRUE)
+    glDisable(GL_BLEND)
+
+
+
 VERTEX_SHADER = """
 #version 120
 attribute vec3 a_position;
@@ -244,8 +371,15 @@ void main()
 
 def draw_field():
     # Calculate field peak on CUDA.
+    global display_peak
+
     field_gpu = sim.E[1]
     peak = float(cp.max(cp.abs(field_gpu)).item())
+
+    # Remember the strongest field seen so far.
+    # Prevent fading waves from being artificially brightened.
+    display_peak = max(display_peak, peak)
+
 
     if peak < 1e-12:
         return 0
@@ -268,7 +402,7 @@ def draw_field():
 
     glUniform1f(
         glGetUniformLocation(shader_program, "u_peak"),
-        peak
+        display_peak
     )
     glUniform1f(
         glGetUniformLocation(shader_program, "u_threshold"),
@@ -749,11 +883,12 @@ def main():
         glTranslatef(0, 0, -camera_distance)
         glRotatef(rotation_x, 1, 0, 0)
         glRotatef(rotation_y, 0, 1, 0)
-
+                
+        draw_room_tiles(sim.N)
         point_count = draw_field()
         draw_box(sim.N)
         draw_source()
-        draw_preview_source()
+        draw_preview_source()  # NEW: Show source while positioning
         draw_axes(sim.N)
         draw_overlay(small_font, large_font, projected_axis_labels(sim.N))
 

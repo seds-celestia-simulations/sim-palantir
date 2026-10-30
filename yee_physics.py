@@ -36,6 +36,27 @@ def compute_stable_dt(safety=0.85):
 
 dt = compute_stable_dt()
 
+
+# Thin lossy coating on the six reflective walls.
+WALL_LOSS = 0.2
+WALL_LAYER_CELLS = 2
+
+wall_damping = cp.ones((N, N, N), dtype=cp.float64)
+
+for i in range(WALL_LAYER_CELLS):
+    strength = ((WALL_LAYER_CELLS - i) / WALL_LAYER_CELLS)**2
+    factor = 1.0 - WALL_LOSS * strength
+
+    wall_damping[i, :, :] *= factor
+    wall_damping[-i-1, :, :] *= factor
+
+    wall_damping[:, i, :] *= factor
+    wall_damping[:, -i-1, :] *= factor
+
+    wall_damping[:, :, i] *= factor
+    wall_damping[:, :, -i-1] *= factor
+
+
 # Fast forward difference with zero-valued boundaries.
 _forward_kernel = cp.ElementwiseKernel(
     'raw T f, int32 side, int32 stride, float64 inv_spacing',
@@ -161,11 +182,39 @@ def step(n):
         pulse = src["temporal behaviour"](tau)
         J += eps_fixed * c * pulse * src["gpu_shape"]
 
+    
     # Faraday's law: update B using the current E.
     B -= dt * curl(E, forward)
     H = B / mu
+
     # Ampere-Maxwell law: update E using the new B.
     E += dt * (curl(H, backward) - J) / eps
+
+    
+    # Perfect electric conductor (PEC) boundary conditions.
+    # Tangential electric field must vanish at each wall.
+
+    # X walls
+    E[1, 0, :, :] = E[1, -1, :, :] = 0
+    E[2, 0, :, :] = E[2, -1, :, :] = 0
+
+    # Y walls
+    E[0, :, 0, :] = E[0, :, -1, :] = 0
+    E[2, :, 0, :] = E[2, :, -1, :] = 0
+
+    # Z walls
+    E[0, :, :, 0] = E[0, :, :, -1] = 0
+    E[1, :, :, 0] = E[1, :, :, -1] = 0
+
+    # Very gentle uniform damping.
+    # Reflected waves gradually lose energy as they propagate.
+    
+    # Dissipate energy only near the reflecting walls.
+    E *= wall_damping
+    B *= wall_damping
+
+
+
 
 
 def check_constraints():

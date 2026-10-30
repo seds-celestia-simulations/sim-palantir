@@ -21,9 +21,9 @@ camera_distance = 200.0
 rotation_x, rotation_y = 25.0, 35.0
 paused = False
 step_number = 0
-FIELD_OPACITY = 0.065
-OPACITY_MIN = 0.025
-OPACITY_MAX = 0.10
+FIELD_OPACITY = 0.009
+OPACITY_MIN = 0.001
+OPACITY_MAX = 0.05
 display_peak = 1e-12
 
 SLIDER_X = 20
@@ -398,21 +398,65 @@ varying float v_strength;
 
 void main()
 {
-    float strength = abs(a_field) / max(u_peak, 1e-30);
-    v_strength = clamp(strength, 0.0, 1.0);
+    
+    float raw_strength = abs(a_field) / max(u_peak, 1e-30);
+    // Gamma correction: make weaker fields much more visible.
+    float strength = pow(clamp(raw_strength, 0.0, 1.0), 0.40);
+    v_strength = strength;
+
 
     // Hide weak field points without CPU filtering.
-    if (strength <= u_threshold) {
+    if (raw_strength <= u_threshold) {
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     } else {
         gl_Position = gl_ModelViewProjectionMatrix * vec4(a_position, 1.0);
     }
 
-    if (a_field >= 0.0) {
-        v_color = vec3(1.0, 0.05, 0.0);  // Positive: Red
-    } else {
-        v_color = vec3(0.0, 0.05, 1.0);  // Negative: Blue
+    
+    // Thermal heatmap based on normalized E-field magnitude.
+    float s = v_strength;
+
+    if (s < 0.15) {
+        // Black to dark purple
+        v_color = mix(
+            vec3(0.0, 0.0, 0.0),
+            vec3(0.25, 0.0, 0.45),
+            s / 0.15
+        );
     }
+    else if (s < 0.35) {
+        // Purple to red
+        v_color = mix(
+            vec3(0.25, 0.0, 0.45),
+            vec3(0.8, 0.0, 0.1),
+            (s - 0.15) / 0.20
+        );
+    }
+    else if (s < 0.60) {
+        // Red to orange
+        v_color = mix(
+            vec3(0.8, 0.0, 0.1),
+            vec3(1.0, 0.45, 0.0),
+            (s - 0.35) / 0.25
+        );
+    }
+    else if (s < 0.80) {
+        // Orange to yellow
+        v_color = mix(
+            vec3(1.0, 0.45, 0.0),
+            vec3(1.0, 0.9, 0.0),
+            (s - 0.60) / 0.20
+        );
+    }
+    else {
+        // Yellow to white
+        v_color = mix(
+            vec3(1.0, 0.9, 0.0),
+            vec3(1.0, 1.0, 1.0),
+            (s - 0.80) / 0.20
+        );
+    }
+
 }
 """
 
@@ -424,7 +468,7 @@ uniform float u_opacity;
 
 void main()
 {
-    float alpha = u_opacity * sqrt(v_strength);
+    float alpha = min(0.5, 3.0 * u_opacity * sqrt(v_strength));
     gl_FragColor = vec4(v_color, alpha);
 }
 """
@@ -433,7 +477,7 @@ def draw_field():
     # Calculate field peak on CUDA.
     global display_peak
 
-    field_gpu = sim.E[1]
+    field_gpu = cp.sqrt(sim.E[0]**2 + sim.E[1]**2 + sim.E[2]**2)
     peak = float(cp.max(cp.abs(field_gpu)).item())
 
     # Remember the strongest field seen so far.
@@ -631,7 +675,7 @@ def draw_overlay(small_font, large_font, axis_labels):
 
     # Legend: Moved from the top-left corner to the bottom-left
     draw_text(small_font, 15, 68, "Yellow points: current-source region", (255, 220, 70))
-    draw_text(small_font, 15, 43, "Ey field: red positive, blue negative")
+    draw_text(small_font, 15, 43, "|E| magnitude: black (weak) to white (strong)")
     draw_text(small_font, 15, 18, "Drag: rotate | Wheel: zoom | Space: pause | Esc: quit")
     draw_opacity_slider(small_font)
 

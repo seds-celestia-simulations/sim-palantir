@@ -34,7 +34,8 @@ input_state = {
     "stage": 0,
     "shape": None,
     "behaviour": None,
-    "axis": None
+    "axis": None,
+    "position": [sim.N // 2, sim.N // 2, sim.N // 2]
 }
 
 # Grid coordinates centered on the simulation's source.
@@ -50,6 +51,55 @@ value_vbo = None
 
 # OpenGL buffer, initialized after the window is created.
 field_vbo = None
+
+def draw_preview_source():
+    """Draw a visual representation of the active source preview before finalizing."""
+    if input_state["stage"] != 4:
+        return
+
+    glDisable(GL_DEPTH_TEST)
+    glLineWidth(3.0)
+    glColor3f(1.0, 0.4, 0.0)  # Orange indicator for preview
+
+    shape = input_state["shape"]
+    axis = input_state["axis"]
+    px, py, pz = input_state["position"]
+    
+    ox, oy, oz = px - sim.N / 2, py - sim.N / 2, pz - sim.N / 2
+
+    if shape == "Dipole":
+        half_len = 6.0
+        glBegin(GL_LINES)
+        if axis == 0:
+            glVertex3f(ox - half_len, oy, oz)
+            glVertex3f(ox + half_len, oy, oz)
+        elif axis == 1:
+            glVertex3f(ox, oy - half_len, oz)
+            glVertex3f(ox, oy + half_len, oz)
+        elif axis == 2:
+            glVertex3f(ox, oy, oz - half_len)
+            glVertex3f(ox, oy, oz + half_len)
+        glEnd()
+
+    elif shape in ["Current loop", "Current Loop"]:
+        radius = 2.0
+        segments = 32
+        glBegin(GL_LINE_LOOP)
+        for i in range(segments):
+            theta = 2.0 * np.pi * i / segments
+            c = radius * np.cos(theta)
+            s = radius * np.sin(theta)
+            
+            if axis == 0:
+                glVertex3f(ox, oy + c, oz + s)
+            elif axis == 1:
+                glVertex3f(ox + c, oy, oz + s)
+            elif axis == 2:
+                glVertex3f(ox + c, oy + s, oz)
+        glEnd()
+
+    glLineWidth(1.0)
+    glEnable(GL_DEPTH_TEST)
 
 
 def get_raycast_grid_coordinate(mouse_x, mouse_y):
@@ -440,6 +490,9 @@ def draw_overlay(small_font, large_font, axis_labels):
             prompt_text = "Select orientation direction: [1] X   [3] Z"
         else: 
             prompt_text = "Select orientation direction: [1] X   [2] Y   [3] Z"
+    elif input_state["stage"] == 4:
+        px, py, pz = input_state["position"]
+        prompt_text = f"Move: Arrows (X/Y) | Shift+Arrows (Z) | Position: ({px}, {py}, {pz}) | Press [Enter] to place"
 
     if prompt_text:
         # Calculate horizontal centering and clamp to 0 to prevent OpenGL culling
@@ -537,6 +590,7 @@ def main():
     global camera_distance, rotation_x, rotation_y, paused, step_number, field_vbo
 
     pygame.init()
+    pygame.key.set_repeat(200, 30)
     small_font = pygame.font.Font(None, 23)
     large_font = pygame.font.Font(None, 34)
     pygame.display.set_caption("3D Yee FDTD | Ey field and source")
@@ -591,23 +645,49 @@ def main():
                         input_state["stage"] = 3
                 
                 elif input_state["stage"] == 3:
+                    valid_selection = False
                     if event.key == K_1:
                         input_state["axis"] = 0
+                        valid_selection = True
+                        input_state["stage"] = 4
                     elif event.key == K_2 and input_state["shape"] != "Current loop": # Since the renderer checks E_y, a ring with a vertical axis appears to emit nothing. If we change the renderer to check |E| instead of E_y, we stop seeing different colours for different half cycles (since |E| is always positive).
                         input_state["axis"] = 1
+                        valid_selection = True
+                        input_state["stage"] = 4
                     elif event.key == K_3:
                         input_state["axis"] = 2
+                        valid_selection = True
+                        input_state["stage"] = 4
                     
-                    if event.key in (K_1, K_3) or (event.key == K_2 and input_state["shape"] == "Dipole"):
-                        # Generate random valid position
-                        target_coord = get_random_valid_position()
-                        
-                        # Add new active source
+                    if valid_selection:
+                        input_state["position"] = [sim.N // 2, sim.N // 2, sim.N // 2]
+                    
+                elif input_state["stage"] == 4:
+                    keys = pygame.key.get_pressed()
+                    shift_pressed = keys[K_LSHIFT] or keys[K_RSHIFT]
+
+                    if shift_pressed:
+                        if event.key == K_LEFT or event.key == K_DOWN:
+                            input_state["position"][2] = max(0, input_state["position"][2] - 1)
+                        elif event.key == K_RIGHT or event.key == K_UP:
+                            input_state["position"][2] = min(sim.N - 1, input_state["position"][2] + 1)
+                    else:
+                        if event.key == K_LEFT:
+                            input_state["position"][0] = max(0, input_state["position"][0] - 1)
+                        elif event.key == K_RIGHT:
+                            input_state["position"][0] = min(sim.N - 1, input_state["position"][0] + 1)
+                        elif event.key == K_DOWN:
+                            input_state["position"][1] = max(0, input_state["position"][1] - 1)
+                        elif event.key == K_UP:
+                            input_state["position"][1] = min(sim.N - 1, input_state["position"][1] + 1)
+
+                    if event.key == K_RETURN or event.key == K_KP_ENTER:
+                        # Finalize dynamic source placement
                         sim.add_dynamic_source(
                             input_state["shape"],
                             input_state["behaviour"],
                             input_state["axis"],
-                            target_coord,
+                            tuple(input_state["position"]),
                             step_number
                         )
                         
@@ -616,6 +696,7 @@ def main():
                         input_state["shape"] = None
                         input_state["behaviour"] = None
                         input_state["axis"] = None
+                        input_state["position"] = [sim.N // 2, sim.N // 2, sim.N // 2]
 
             elif event.type == MOUSEBUTTONDOWN:
                 if event.button == 1:
@@ -672,6 +753,7 @@ def main():
         point_count = draw_field()
         draw_box(sim.N)
         draw_source()
+        draw_preview_source()
         draw_axes(sim.N)
         draw_overlay(small_font, large_font, projected_axis_labels(sim.N))
 

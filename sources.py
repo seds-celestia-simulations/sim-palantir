@@ -4,8 +4,9 @@ import numpy as np
 from numpy.typing import NDArray
 
 
-class SourceShapes:
-    """Spatial arrangements for the current source. (values of J_shape)"""
+class ElementarySourceShapes:
+    """Elementary shapes that are used to compose the actual current sources."""
+
 
     @staticmethod
     def current_loop(
@@ -42,6 +43,7 @@ class SourceShapes:
             backward(Fx, 2) - backward(Fz, 0),
             backward(Fy, 0) - backward(Fx, 1),
         ]) * maximum_signal_strength
+
 
     @staticmethod
     def dipole(
@@ -90,6 +92,61 @@ class SourceShapes:
             0.0
         )
         return J_shape
+
+
+class SourceShapes:
+    """Spatial arrangements for the current source."""
+
+
+    @staticmethod
+    def wifi_router(
+        axis: int,
+        room_length: int,
+        source_position: tuple[int, int, int] | None = None,
+        antenna_spacing: int = 8,
+        antenna_length: int = 10,
+        maximum_signal_strength: float = 10.0
+    ) -> NDArray[np.float64]:
+        """A Wi-Fi router represented as 2 parallel dipole antennae separated by a fixed distance."""
+        if source_position is None: source_position = (room_length // 2, room_length // 2, room_length // 2)
+
+        J_shape = np.zeros((3, room_length, room_length, room_length))
+        source_x, source_y, source_z = source_position
+        offset = antenna_spacing // 2
+
+        for dir_sign in [-1, 1]:
+            match axis:
+                case 0: antenna_position = (source_x + dir_sign * offset, source_y, source_z)
+                case 1: antenna_position = (source_x, source_y + dir_sign * offset, source_z)
+                case 2: antenna_position = (source_x, source_y, source_z + dir_sign * offset)
+
+            J_shape += ElementarySourceShapes.dipole(
+                axis,
+                room_length,
+                source_position=antenna_position,
+                dipole_length=antenna_length,
+                maximum_signal_strength=maximum_signal_strength / 2.0
+            )
+
+        return J_shape
+
+
+    @staticmethod
+    def phone(
+        dx: float,
+        axis: int,
+        room_length: int,
+        source_position: tuple[int, int, int] | None = None,
+        maximum_signal_strength: float = 10.0
+    ) -> NDArray[np.float64]:
+        """A mobile phone represented as a compact internal loop antenna (PIFA/Loop)."""
+        return ElementarySourceShapes.current_loop(
+            dx,
+            axis,
+            room_length,
+            source_position,
+            maximum_signal_strength
+        )
 
 
 class TemporalBehaviours:

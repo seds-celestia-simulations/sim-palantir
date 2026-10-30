@@ -110,22 +110,18 @@ current_sources = []
 J_shape = cp.zeros((3, N, N, N), dtype=cp.float64) # Global shape mask for the viewer
 
 def add_dynamic_source(shape_name, behaviour_name, axis, position, start_step=0):
-    """Injects a new dynamic source into the simulation."""
     global J_shape, current_sources
     
-    # Calculate the time offset for this specific source
     start_t = (start_step + 0.5) * dt
     start_tau = start_t * c / dx
     
-    # Generate Spatial Array
-    if shape_name == "Current loop":
-        shape_arr = sources.SourceShapes.current_loop(dx=dx, axis=axis, room_length=N, source_position=position)
-    elif shape_name == "Dipole":
-        shape_arr = sources.SourceShapes.dipole(axis=axis, room_length=N, source_position=position)
+    if shape_name == "Wi-Fi Router":
+        shape_arr = sources.SourceShapes.wifi_router(axis=axis, room_length=N, source_position=position)
+    elif shape_name == "Phone":
+        shape_arr = sources.SourceShapes.phone(dx=dx, axis=axis, room_length=N, source_position=position)
     else:
         return
         
-    # Generate Temporal Lambda with time offset applied
     if behaviour_name == "Gaussian Pulse":
         beh_func = lambda t: sources.TemporalBehaviours.gaussian_pulse(t - start_tau)
     elif behaviour_name == "Ramped-up Sine":
@@ -145,7 +141,6 @@ def add_dynamic_source(shape_name, behaviour_name, axis, position, start_step=0)
         "position": position
     })
     
-    # Accumulate into the viewer's diagnostic mask
     J_shape += cp.abs(gpu_shape)
 
 

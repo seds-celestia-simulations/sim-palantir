@@ -54,53 +54,113 @@ value_vbo = None
 field_vbo = None
 
 def draw_preview_source():
-    """Draw a visual representation of the active source preview before finalizing."""
     if input_state["stage"] != 4:
         return
 
     glDisable(GL_DEPTH_TEST)
-    glLineWidth(3.0)
-    glColor3f(1.0, 0.4, 0.0)  # Orange indicator for preview
-
     shape = input_state["shape"]
     axis = input_state["axis"]
     px, py, pz = input_state["position"]
-    
     ox, oy, oz = px - sim.N / 2, py - sim.N / 2, pz - sim.N / 2
 
-    if shape == "Dipole":
-        half_len = 6.0
-        glBegin(GL_LINES)
-        if axis == 0:
-            glVertex3f(ox - half_len, oy, oz)
-            glVertex3f(ox + half_len, oy, oz)
-        elif axis == 1:
-            glVertex3f(ox, oy - half_len, oz)
-            glVertex3f(ox, oy + half_len, oz)
-        elif axis == 2:
-            glVertex3f(ox, oy, oz - half_len)
-            glVertex3f(ox, oy, oz + half_len)
-        glEnd()
-
-    elif shape in ["Current loop", "Current Loop"]:
-        radius = 2.0
-        segments = 32
-        glBegin(GL_LINE_LOOP)
-        for i in range(segments):
-            theta = 2.0 * np.pi * i / segments
-            c = radius * np.cos(theta)
-            s = radius * np.sin(theta)
-            
-            if axis == 0:
-                glVertex3f(ox, oy + c, oz + s)
-            elif axis == 1:
-                glVertex3f(ox + c, oy, oz + s)
-            elif axis == 2:
-                glVertex3f(ox + c, oy + s, oz)
-        glEnd()
+    color = (1.0, 0.4, 0.0)  # Orange indicator
+    if shape == "Wi-Fi Router":
+        render_router_geometry(ox, oy, oz, axis, color)
+    elif shape == "Phone":
+        render_phone_geometry(ox, oy, oz, axis, color)
 
     glLineWidth(1.0)
     glEnable(GL_DEPTH_TEST)
+
+def render_router_geometry(ox, oy, oz, axis, color):
+    glColor3fv(color)
+    
+    # 1. Router Body (rectangular slab)
+    glLineWidth(2.0)
+    
+    # Orient the router body based on the antenna axis
+    if axis == 0:
+        bw, bh, bd = 6.0, 2.5, 4.0
+    elif axis == 1:
+        bw, bh, bd = 2.5, 6.0, 4.0
+    else: # axis == 2
+        bw, bh, bd = 4.0, 2.5, 6.0
+
+    corners = [
+        (ox - bw, oy - bh, oz - bd), (ox + bw, oy - bh, oz - bd),
+        (ox + bw, oy + bh, oz - bd), (ox - bw, oy + bh, oz - bd),
+        (ox - bw, oy - bh, oz + bd), (ox + bw, oy - bh, oz + bd),
+        (ox + bw, oy + bh, oz + bd), (ox - bw, oy + bh, oz + bd),
+    ]
+    edges = [
+        (0, 1), (1, 2), (2, 3), (3, 0),
+        (4, 5), (5, 6), (6, 7), (7, 4),
+        (0, 4), (1, 5), (2, 6), (3, 7),
+    ]
+    
+    glBegin(GL_LINES)
+    for a, b in edges:
+        glVertex3f(*corners[a])
+        glVertex3f(*corners[b])
+    glEnd()
+
+    # 2. Antennas (Two dipoles at distance)
+    glLineWidth(3.0)
+    antenna_spacing = 4.0
+    half_len = 5.0
+    glBegin(GL_LINES)
+    for offset in [-antenna_spacing, antenna_spacing]:
+        if axis == 0:
+            glVertex3f(ox - half_len, oy + offset, oz)
+            glVertex3f(ox + half_len, oy + offset, oz)
+        elif axis == 1:
+            glVertex3f(ox + offset, oy - half_len, oz)
+            glVertex3f(ox + offset, oy + half_len, oz)
+        elif axis == 2:
+            glVertex3f(ox + offset, oy, oz - half_len)
+            glVertex3f(ox + offset, oy, oz + half_len)
+    glEnd()
+
+
+def render_phone_geometry(ox, oy, oz, axis, color):
+    glColor3fv(color)
+    
+    # Phone Body (handset outline)
+    pw, ph = 2.5, 5.0
+    glLineWidth(2.0)
+    glBegin(GL_LINE_LOOP)
+    if axis == 0:
+        glVertex3f(ox, oy - ph, oz - pw)
+        glVertex3f(ox, oy + ph, oz - pw)
+        glVertex3f(ox, oy + ph, oz + pw)
+        glVertex3f(ox, oy - ph, oz + pw)
+    elif axis == 1:
+        glVertex3f(ox - pw, oy, oz - ph)
+        glVertex3f(ox + pw, oy, oz - ph)
+        glVertex3f(ox + pw, oy, oz + ph)
+        glVertex3f(ox - pw, oy, oz + ph)
+    elif axis == 2:
+        glVertex3f(ox - pw, oy - ph, oz)
+        glVertex3f(ox + pw, oy - ph, oz)
+        glVertex3f(ox + pw, oy + ph, oz)
+        glVertex3f(ox - pw, oy + ph, oz)
+    glEnd()
+
+    # Compact Internal Loop Antenna
+    radius = 1.2
+    segments = 16
+    glLineWidth(3.0)
+    glBegin(GL_LINE_LOOP)
+    for i in range(segments):
+        theta = 2.0 * np.pi * i / segments
+        c, s = radius * np.cos(theta), radius * np.sin(theta)
+        if axis == 0:
+            glVertex3f(ox, oy + c, oz + s)
+        elif axis == 1:
+            glVertex3f(ox + c, oy, oz + s)
+        elif axis == 2:
+            glVertex3f(ox + c, oy + s, oz)
+    glEnd()
 
 
 def get_raycast_grid_coordinate(mouse_x, mouse_y):
@@ -461,57 +521,24 @@ def draw_field():
 
 
 def draw_source():
-    """Draw parametric representations of the current sources."""
     if not sim.current_sources:
         return
 
     glDisable(GL_DEPTH_TEST)
-    glLineWidth(3.0)
-    glColor3f(1.0, 0.85, 0.1)  # Yellow
-    
     for src in sim.current_sources:
         shape = src.get("shape_name")
         axis = src.get("axis")
         px, py, pz = src.get("position")
-        
-        # Offset to OpenGL coordinates (center of the cube is 0,0,0)
         ox, oy, oz = px - sim.N / 2, py - sim.N / 2, pz - sim.N / 2
-        
-        if shape == "Dipole":
-            half_len = 6.0  # Dipole length is 12 grid units
-            glBegin(GL_LINES)
-            if axis == 0:
-                glVertex3f(ox - half_len, oy, oz)
-                glVertex3f(ox + half_len, oy, oz)
-            elif axis == 1:
-                glVertex3f(ox, oy - half_len, oz)
-                glVertex3f(ox, oy + half_len, oz)
-            elif axis == 2:
-                glVertex3f(ox, oy, oz - half_len)
-                glVertex3f(ox, oy, oz + half_len)
-            glEnd()
-            
-        elif shape in ["Current loop", "Current Loop"]:
-            radius = 2.0  # Loop peak magnitude radius
-            segments = 32
-            glBegin(GL_LINE_LOOP)
-            for i in range(segments):
-                theta = 2.0 * np.pi * i / segments
-                c = radius * np.cos(theta)
-                s = radius * np.sin(theta)
-                
-                # Orient the circle perpendicular to the selected axis
-                if axis == 0:
-                    glVertex3f(ox, oy + c, oz + s)
-                elif axis == 1:
-                    glVertex3f(ox + c, oy, oz + s)
-                elif axis == 2:
-                    glVertex3f(ox + c, oy + s, oz)
-            glEnd()
+
+        color = (1.0, 0.85, 0.1)  # Yellow
+        if shape == "Wi-Fi Router":
+            render_router_geometry(ox, oy, oz, axis, color)
+        elif shape == "Phone":
+            render_phone_geometry(ox, oy, oz, axis, color)
 
     glLineWidth(1.0)
     glEnable(GL_DEPTH_TEST)
-
 
 def draw_text(font, x, y, text, color=(235, 238, 245)):
     """Draw transparent Pygame text at screen coordinates (bottom-left origin)."""
@@ -615,7 +642,7 @@ def draw_overlay(small_font, large_font, axis_labels):
     if input_state["stage"] == 0:
         prompt_text = "Press 'N' to add a new source"
     elif input_state["stage"] == 1:
-        prompt_text = "Select current source shape: [1] Current Loop   [2] Dipole"
+        prompt_text = "Select source device: [1] Wi-Fi Router   [2] Phone"
     elif input_state["stage"] == 2:
         # Shortened string to prevent the width from exceeding the 1000px window
         prompt_text = "Select behaviour: [1] Gaussian Pulse  [2] Ramped-up Sine  [3] Packet Burst"
@@ -761,10 +788,10 @@ def main():
                 
                 elif input_state["stage"] == 1:
                     if event.key == K_1:
-                        input_state["shape"] = "Current loop"  # Change capital 'L' to lowercase 'l'
+                        input_state["shape"] = "Wi-Fi Router"
                         input_state["stage"] = 2
                     elif event.key == K_2:
-                        input_state["shape"] = "Dipole"
+                        input_state["shape"] = "Phone"
                         input_state["stage"] = 2
                 
                 elif input_state["stage"] == 2:
@@ -777,6 +804,10 @@ def main():
                     elif event.key == K_3:
                         input_state["behaviour"] = "Packet Burst"
                         input_state["stage"] = 3
+
+                    if input_state["shape"] == "Wi-Fi Router": # If the dipoles are not oriented along the y-axis, then E_y will be low, and the waves will appear to be very weak.
+                        input_state["axis"] = 1
+                        input_state["stage"] = 4
                 
                 elif input_state["stage"] == 3:
                     valid_selection = False
@@ -801,18 +832,18 @@ def main():
                     shift_pressed = keys[K_LSHIFT] or keys[K_RSHIFT]
 
                     if shift_pressed:
-                        if event.key == K_LEFT or event.key == K_DOWN:
+                        if (event.key == K_LEFT or event.key == K_DOWN) and input_state["position"][2] > 10:
                             input_state["position"][2] = max(0, input_state["position"][2] - 1)
-                        elif event.key == K_RIGHT or event.key == K_UP:
+                        elif (event.key == K_RIGHT or event.key == K_UP) and input_state["position"][2] < 90:
                             input_state["position"][2] = min(sim.N - 1, input_state["position"][2] + 1)
                     else:
-                        if event.key == K_LEFT:
+                        if event.key == K_LEFT and input_state["position"][0] > 10:
                             input_state["position"][0] = max(0, input_state["position"][0] - 1)
-                        elif event.key == K_RIGHT:
+                        elif event.key == K_RIGHT and input_state["position"][0] < 90:
                             input_state["position"][0] = min(sim.N - 1, input_state["position"][0] + 1)
-                        elif event.key == K_DOWN:
+                        elif event.key == K_DOWN and input_state["position"][1] > 10:
                             input_state["position"][1] = max(0, input_state["position"][1] - 1)
-                        elif event.key == K_UP:
+                        elif event.key == K_UP and input_state["position"][1] < 90:
                             input_state["position"][1] = min(sim.N - 1, input_state["position"][1] + 1)
 
                     if event.key == K_RETURN or event.key == K_KP_ENTER:

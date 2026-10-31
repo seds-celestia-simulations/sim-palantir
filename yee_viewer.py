@@ -383,6 +383,200 @@ def draw_room_tiles(size, tile_size=10):
     glDisable(GL_BLEND)
 
 
+def draw_furniture_box(x0, y0, z0, x1, y1, z1, color):
+    """Draw a shaded, solid rectangular furniture component."""
+    r, g, b = color
+
+    faces = [
+        # Top
+        (1.15, [(x0,y1,z0), (x1,y1,z0),
+                (x1,y1,z1), (x0,y1,z1)]),
+
+        # Bottom
+        (0.60, [(x0,y0,z0), (x1,y0,z0),
+                (x1,y0,z1), (x0,y0,z1)]),
+
+        # Front
+        (1.00, [(x0,y0,z1), (x1,y0,z1),
+                (x1,y1,z1), (x0,y1,z1)]),
+
+        # Back
+        (0.70, [(x0,y0,z0), (x1,y0,z0),
+                (x1,y1,z0), (x0,y1,z0)]),
+
+        # Left
+        (0.80, [(x0,y0,z0), (x0,y0,z1),
+                (x0,y1,z1), (x0,y1,z0)]),
+
+        # Right
+        (0.90, [(x1,y0,z0), (x1,y0,z1),
+                (x1,y1,z1), (x1,y1,z0)])
+    ]
+
+    glBegin(GL_QUADS)
+    for shade, vertices in faces:
+        glColor3f(
+            min(1.0, r * shade),
+            min(1.0, g * shade),
+            min(1.0, b * shade)
+        )
+        for vertex in vertices:
+            glVertex3f(*vertex)
+    glEnd()
+
+
+def draw_furniture():
+    """Draw sofa, bed and bookshelf in separate room corners."""
+    h = sim.N / 2.0
+    floor = -h
+
+    # ==============================
+    # SOFA: Left-front corner
+    # ==============================
+    sx, sz = -h + 22, h - 13
+
+    # Four wooden legs
+    for x in (sx - 10, sx + 10):
+        for z in (sz - 5, sz + 5):
+            draw_furniture_box(
+                x-1, floor, z-1,
+                x+1, floor+3.5, z+1,
+                (0.22, 0.14, 0.10)
+            )
+
+    # Main seat base
+    draw_furniture_box(
+        sx-13, floor+3, sz-7,
+        sx+13, floor+7, sz+7,
+        (0.20, 0.36, 0.40)
+    )
+
+    # Tall backrest
+    draw_furniture_box(
+        sx-13, floor+6, sz+5.5,
+        sx+13, floor+17, sz+8,
+        (0.25, 0.46, 0.50)
+    )
+
+    # Left and right armrests
+    for x0, x1 in ((sx-13, sx-10.5),
+                   (sx+10.5, sx+13)):
+        draw_furniture_box(
+            x0, floor+7, sz-7,
+            x1, floor+12, sz+7,
+            (0.25, 0.46, 0.50)
+        )
+
+    # Three individual sofa cushions
+    for offset in (-7, 0, 7):
+        draw_furniture_box(
+            sx+offset-3.35, floor+7, sz-6.5,
+            sx+offset+3.35, floor+9, sz+5,
+            (0.34, 0.61, 0.65)
+        )
+
+    # ==============================
+    # BED: Right-front corner
+    # ==============================
+    bx, bz = h - 22, h - 22
+
+    # Wooden bed frame
+    draw_furniture_box(
+        bx-11, floor+2, bz-14,
+        bx+11, floor+5, bz+14,
+        (0.39, 0.24, 0.15)
+    )
+
+    # Four short legs
+    for x in (bx-9, bx+9):
+        for z in (bz-12, bz+12):
+            draw_furniture_box(
+                x-1, floor, z-1,
+                x+1, floor+3, z+1,
+                (0.30, 0.18, 0.11)
+            )
+
+    # Headboard
+    draw_furniture_box(
+        bx-11, floor+3, bz+14,
+        bx+11, floor+15, bz+16,
+        (0.43, 0.27, 0.17)
+    )
+
+    # Mattress
+    draw_furniture_box(
+        bx-10, floor+5, bz-13,
+        bx+10, floor+8, bz+13,
+        (0.84, 0.85, 0.82)
+    )
+
+    # Blue blanket
+    draw_furniture_box(
+        bx-10, floor+8, bz-13,
+        bx+10, floor+8.7, bz+5,
+        (0.24, 0.35, 0.68)
+    )
+
+    # Two pillows near the headboard
+    for x in (bx-5, bx+5):
+        draw_furniture_box(
+            x-4, floor+8, bz+7,
+            x+4, floor+9.5, bz+12,
+            (0.95, 0.92, 0.82)
+        )
+
+    # ==============================
+    # BOOKSHELF: Left-back corner
+    # ==============================
+    kx, kz = -h + 17, -h + 9
+    wood = (0.43, 0.27, 0.15)
+
+    # Back panel
+    draw_furniture_box(
+        kx-10, floor+1, kz-4,
+        kx+10, floor+29, kz-3.4,
+        wood
+    )
+
+    # Vertical side panels
+    for x0, x1 in ((kx-10.5, kx-9),
+                   (kx+9, kx+10.5)):
+        draw_furniture_box(
+            x0, floor+1, kz-4,
+            x1, floor+30, kz+4,
+            wood
+        )
+
+    # Horizontal shelves
+    for height in (1, 10, 19, 28):
+        draw_furniture_box(
+            kx-10.5, floor+height, kz-4,
+            kx+10.5, floor+height+1, kz+4,
+            wood
+        )
+
+    # Colourful books in three rows
+    book_colors = [
+        (0.68, 0.18, 0.17),
+        (0.15, 0.37, 0.65),
+        (0.24, 0.53, 0.34),
+        (0.75, 0.55, 0.17),
+        (0.48, 0.28, 0.60),
+        (0.71, 0.38, 0.23)
+    ]
+
+    for row in range(3):
+        for i in range(9):
+            x = kx - 8.2 + i * 1.9
+            y = floor + 2.3 + row * 9
+            book_height = 5.0 + (i % 3) * 0.8
+
+            draw_furniture_box(
+                x, y, kz+0.5,
+                x+1.5, y+book_height, kz+3.3,
+                book_colors[(i+row*3) % len(book_colors)]
+            )
+
 
 VERTEX_SHADER = """
 #version 120
@@ -943,6 +1137,7 @@ def main():
         glRotatef(rotation_y, 0, 1, 0)
                 
         draw_room_tiles(sim.N)
+        draw_furniture()
         point_count = draw_field()
         draw_box(sim.N)
         draw_source()

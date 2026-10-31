@@ -38,8 +38,8 @@ dt = compute_stable_dt()
 
 
 # Thin lossy coating on the six reflective walls.
-WALL_LOSS = 0.9
-WALL_LAYER_CELLS = 0
+WALL_LOSS = 1.5
+WALL_LAYER_CELLS = 1
 
 wall_damping = cp.ones((N, N, N), dtype=cp.float64)
 
@@ -145,8 +145,8 @@ def add_dynamic_source(shape_name, behaviour_name, axis, position, start_step=0)
         
     if behaviour_name == "Gaussian Pulse":
         beh_func = lambda t: sources.TemporalBehaviours.gaussian_pulse(t - start_tau)
-    elif behaviour_name == "Ramped-up Sine":
-        beh_func = lambda t: sources.TemporalBehaviours.ramped_up_sine(t - start_tau)
+    elif behaviour_name == "Sine":
+        beh_func = lambda t: sources.TemporalBehaviours.sine(t - start_tau)
     elif behaviour_name == "Packet Burst":
         beh_func = lambda t: sources.TemporalBehaviours.packet_burst(t - start_tau)
     else:

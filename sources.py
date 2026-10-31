@@ -175,17 +175,15 @@ class TemporalBehaviours:
         return np.sin(angular_frequency * t + initial_phase) * np.exp(-((t - start_time) / standard_deviation) ** 2)
 
     @staticmethod
-    def ramped_up_sine(
+    def sine(
         t: float,
-        time_constant: float = 5.0,
         initial_phase: float = 0.0,
         angular_frequency: float = 0.6
     ) -> NDArray[np.float64]:
-        """(1 - e^(-t/tau)) * sin(omega * t)
+        """sin(omega * t)
 
         Args:
             t: time
-            time_constant: Time constant (tau) for ramping up the signal strength gradually (default: 5.0).
             initial_phase: The initial phase of the sine function (default: 0.0)
             angular_frequency: The angular frequency (omega) of the sine function (default: 0.6)
 
@@ -193,7 +191,7 @@ class TemporalBehaviours:
             Amplitude array at time t.
         """
 
-        return (1.0 - np.exp(- t / time_constant)) * np.sin(angular_frequency * t + initial_phase)
+        return np.sin(angular_frequency * t + initial_phase)
 
     @staticmethod
     def packet_burst(

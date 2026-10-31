@@ -480,11 +480,6 @@ def draw_field():
     field_gpu = cp.sqrt(sim.E[0]**2 + sim.E[1]**2 + sim.E[2]**2)
     peak = float(cp.max(cp.abs(field_gpu)).item())
 
-    # Remember the strongest field seen so far.
-    # Prevent fading waves from being artificially brightened.
-    display_peak = max(display_peak, peak)
-
-
     if peak < 1e-12:
         return 0
 
@@ -506,7 +501,7 @@ def draw_field():
 
     glUniform1f(
         glGetUniformLocation(shader_program, "u_peak"),
-        display_peak
+        peak  # Modified: Pass instantaneous peak instead of display_peak
     )
     glUniform1f(
         glGetUniformLocation(shader_program, "u_threshold"),
@@ -689,7 +684,7 @@ def draw_overlay(small_font, large_font, axis_labels):
         prompt_text = "Select source device: [1] Wi-Fi Router   [2] Phone"
     elif input_state["stage"] == 2:
         # Shortened string to prevent the width from exceeding the 1000px window
-        prompt_text = "Select behaviour: [1] Gaussian Pulse  [2] Ramped-up Sine  [3] Packet Burst"
+        prompt_text = "Select behaviour: [1] Gaussian Pulse  [2] Sine  [3] Packet Burst"
     elif input_state["stage"] == 3:
         if input_state["shape"] == "Current loop": 
             prompt_text = "Select orientation direction: [1] X   [3] Z"
@@ -843,7 +838,7 @@ def main():
                         input_state["behaviour"] = "Gaussian Pulse"
                         input_state["stage"] = 3
                     elif event.key == K_2:
-                        input_state["behaviour"] = "Ramped-up Sine"
+                        input_state["behaviour"] = "Sine"
                         input_state["stage"] = 3
                     elif event.key == K_3:
                         input_state["behaviour"] = "Packet Burst"

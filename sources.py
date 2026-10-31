@@ -164,8 +164,8 @@ class TemporalBehaviours:
 
         Args:
             t: time
-            start_time: time offset (t_0) (default: 25.0)
-            standard_deviation: the standard deviation (sigma) of the pulse function (default: 6.0)
+            start_time: time offset (t_0) (default: 7.0)
+            standard_deviation: the standard deviation (sigma) of the pulse function (default: 12.0)
             initial_phase: The initial phase of the sine function (default: 0.0)
             angular_frequency: The angular frequency (omega) of the sine function (default: 0.6)
 

@@ -38,7 +38,7 @@ dt = compute_stable_dt()
 
 
 # Thin lossy coating on the six reflective walls.
-WALL_LOSS = 1.5
+WALL_LOSS = 1.6
 WALL_LAYER_CELLS = 1
 
 wall_damping = cp.ones((N, N, N), dtype=cp.float64)

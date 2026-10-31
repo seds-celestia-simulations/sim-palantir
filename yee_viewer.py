@@ -670,6 +670,10 @@ def main():
                     elif event.key == K_3:
                         input_state["behaviour"] = "Packet Burst"
                         input_state["stage"] = 3
+
+                    if input_state["shape"] == "Wi-Fi Router": # If the dipoles are not oriented along the y-axis, then E_y will be low, and the waves will appear to be very weak.
+                        input_state["axis"] = 1
+                        input_state["stage"] = 4
                 
                 elif input_state["stage"] == 3:
                     valid_selection = False

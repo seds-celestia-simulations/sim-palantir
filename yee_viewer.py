@@ -502,7 +502,7 @@ def draw_field():
     )
     glUniform1f(
         glGetUniformLocation(shader_program, "u_threshold"),
-        0.01
+        0.001
     )
     glUniform1f(
         glGetUniformLocation(shader_program, "u_opacity"),

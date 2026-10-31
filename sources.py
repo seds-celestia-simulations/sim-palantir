@@ -145,7 +145,7 @@ class SourceShapes:
             axis,
             room_length,
             source_position,
-            maximum_signal_strength
+            maximum_signal_strength / 14
         )
 
 

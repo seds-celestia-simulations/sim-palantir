@@ -209,6 +209,14 @@ def step(n):
     B *= wall_damping
 
 
+def reset():
+    """Reset the simulation fields and remove all sources."""
+    global E, B, J_shape, current_sources
+    E.fill(0)
+    B.fill(0)
+    J_shape.fill(0)
+    current_sources.clear()
+
 
 
 

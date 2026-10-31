@@ -26,9 +26,6 @@ OPACITY_MIN = 0.001
 OPACITY_MAX = 0.05
 display_peak = 1e-12
 
-SLIDER_X = 20
-SLIDER_HEIGHT = 200
-SLIDER_Y = (HEIGHT + SLIDER_HEIGHT) // 2
 
 # Program state for user input (when placing current sources).
 input_state = {
@@ -54,7 +51,7 @@ value_vbo = None
 field_vbo = None
 
 def draw_preview_source():
-    if input_state["stage"] != 4:
+    if input_state["stage"] != 3:
         return
 
     glDisable(GL_DEPTH_TEST)
@@ -592,65 +589,6 @@ def draw_text(font, x, y, text, color=(235, 238, 245)):
                  GL_RGBA, GL_UNSIGNED_BYTE, pixels)
     glDisable(GL_BLEND)
 
-def update_opacity_from_mouse(mouse_y):
-    global FIELD_OPACITY
-
-    # Convert Pygame Y to OpenGL Y.
-    y = HEIGHT - mouse_y
-
-    fraction = (y - (SLIDER_Y - SLIDER_HEIGHT)) / SLIDER_HEIGHT
-    fraction = max(0.0, min(1.0, fraction))
-
-    FIELD_OPACITY = OPACITY_MIN + fraction * (OPACITY_MAX - OPACITY_MIN)
-
-
-def mouse_over_opacity_slider(mouse_pos):
-    x, y = mouse_pos
-
-    slider_top = HEIGHT - SLIDER_Y
-    slider_bottom = slider_top + SLIDER_HEIGHT
-
-    return (
-        abs(x - SLIDER_X) <= 14
-        and slider_top <= y <= slider_bottom
-    )
-
-
-def draw_opacity_slider(font):
-    x = SLIDER_X
-    y = SLIDER_Y
-
-    fraction = (FIELD_OPACITY - OPACITY_MIN) / (OPACITY_MAX - OPACITY_MIN)
-    knob_y = y - SLIDER_HEIGHT + fraction * SLIDER_HEIGHT
-
-    draw_text(font, x, y + 15, f"Field opacity: {FIELD_OPACITY:.3f}")
-
-    # Background track.
-    glColor3f(0.25, 0.28, 0.35)
-    glBegin(GL_QUADS)
-    glVertex2f(x - 3, y)
-    glVertex2f(x + 3, y)
-    glVertex2f(x + 3, y - SLIDER_HEIGHT)
-    glVertex2f(x - 3, y - SLIDER_HEIGHT)
-    glEnd()
-
-    # Filled portion, from bottom to knob.
-    glColor3f(0.95, 0.55, 0.15)
-    glBegin(GL_QUADS)
-    glVertex2f(x - 3, y - SLIDER_HEIGHT)
-    glVertex2f(x + 3, y - SLIDER_HEIGHT)
-    glVertex2f(x + 3, knob_y)
-    glVertex2f(x - 3, knob_y)
-    glEnd()
-
-    # Draggable knob.
-    glColor3f(1.0, 0.9, 0.7)
-    glBegin(GL_QUADS)
-    glVertex2f(x - 9, knob_y - 5)
-    glVertex2f(x + 9, knob_y - 5)
-    glVertex2f(x + 9, knob_y + 5)
-    glVertex2f(x - 9, knob_y + 5)
-    glEnd()
 
 def draw_overlay(small_font, large_font, axis_labels):
     """Draw axis labels and a small legend over the 3D scene."""
@@ -668,11 +606,77 @@ def draw_overlay(small_font, large_font, axis_labels):
     for x, y, label, color in axis_labels:
         draw_text(small_font, x, y, label, color)
 
-    # Legend: Moved from the top-left corner to the bottom-left
     draw_text(small_font, 15, 68, "Yellow points: current-source region", (255, 220, 70))
-    draw_text(small_font, 15, 43, "|E| magnitude: black (weak) to white (strong)")
-    draw_text(small_font, 15, 18, "Drag: rotate | Wheel: zoom | Space: pause | Esc: quit")
-    draw_opacity_slider(small_font)
+    draw_text(small_font, 15, 43, "Electric field magnitude: black (weak) to white (strong)")
+
+    # --- NEW CONTROLS PANE ---
+    pane_width = 280
+    pane_height = 220
+    pane_x = WIDTH - pane_width - 20
+    pane_y_top = HEIGHT - 20
+    pane_y_bottom = pane_y_top - pane_height
+
+    # Draw semi-transparent background for the pane
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    glColor4f(0.1, 0.1, 0.15, 0.8)
+    glBegin(GL_QUADS)
+    glVertex2f(pane_x, pane_y_bottom)
+    glVertex2f(pane_x + pane_width, pane_y_bottom)
+    glVertex2f(pane_x + pane_width, pane_y_top)
+    glVertex2f(pane_x, pane_y_top)
+    glEnd()
+    glDisable(GL_BLEND)
+
+    # Control layout
+    controls = [
+        ("Rotate", "Click and drag"),
+        ("Zoom", "Scroll"),
+        ("Change opacity", "- / +"),
+        ("Pause simulation", "Space"),
+        ("Reset simulation", "C"),
+        ("Quit", "Esc")
+    ]
+    
+    start_y = pane_y_top - 30
+    for i, (action, key) in enumerate(controls):
+        item_y = start_y - i * 30 - 19
+
+        draw_text(small_font, pane_x + 20, item_y, f"{key}: {action}")
+    
+    param_pane_width = 400
+    param_pane_height = 240
+    param_pane_x = WIDTH - param_pane_width - 20
+    param_pane_y_bottom = 20
+    param_pane_y_top = param_pane_y_bottom + param_pane_height
+
+    # Draw semi-transparent background for the parameters pane
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    glColor4f(0.1, 0.1, 0.15, 0.8)
+    glBegin(GL_QUADS)
+    glVertex2f(param_pane_x, param_pane_y_bottom)
+    glVertex2f(param_pane_x + param_pane_width, param_pane_y_bottom)
+    glVertex2f(param_pane_x + param_pane_width, param_pane_y_top)
+    glVertex2f(param_pane_x, param_pane_y_top)
+    glEnd()
+    glDisable(GL_BLEND)
+
+    # Parameters layout using Unicode symbols (ε, μ, Δ)
+    parameters = [
+        f"Grid Size: {sim.N}³ cells",
+        f"Spatial Step (Δx): {sim.dx} m",
+        f"Time Step (Δt): {sim.dt:.3e} s",
+        f"Permittivity (ε): {sim.eps_fixed:.3e} F/m",
+        f"Permeability (μ): {sim.mu_fixed:.3e} H/m",
+        f"Opacity: {FIELD_OPACITY}"
+    ]
+
+    param_start_y = param_pane_y_top - 30
+    draw_text(small_font, param_pane_x + 20, param_start_y - 40, "Simulation Parameters:\n\n", (255, 230, 80))
+    for i, text in enumerate(parameters):
+        item_y = param_start_y - (i + 1) * 25 - 40
+        draw_text(small_font, param_pane_x + 20, item_y, text)
 
     prompt_color = (255, 230, 80)
     prompt_y = HEIGHT - 60  # Moved up above the simulation cube
@@ -683,23 +687,15 @@ def draw_overlay(small_font, large_font, axis_labels):
     elif input_state["stage"] == 1:
         prompt_text = "Select source device: [1] Wi-Fi Router   [2] Phone"
     elif input_state["stage"] == 2:
-        # Shortened string to prevent the width from exceeding the 1000px window
         prompt_text = "Select behaviour: [1] Gaussian Pulse  [2] Sine  [3] Packet Burst"
     elif input_state["stage"] == 3:
-        if input_state["shape"] == "Current loop": 
-            prompt_text = "Select orientation direction: [1] X   [3] Z"
-        else: 
-            prompt_text = "Select orientation direction: [1] X   [2] Y   [3] Z"
-    elif input_state["stage"] == 4:
         px, py, pz = input_state["position"]
-        prompt_text = f"Move: Arrows (X/Y) | Shift+Arrows (Z) | Position: ({px}, {py}, {pz}) | Press [Enter] to place"
+        axis_name = {0: "X", 1: "Y", 2: "Z"}.get(input_state["axis"], "X")
+        prompt_text = f"Move: Arrows (X/Y) | Shift+Arrows (Z) | Rotate: R (Axis: {axis_name}) | Pos: ({px}, {py}, {pz}) | [Enter] to place"
 
     if prompt_text:
-        # Calculate horizontal centering and clamp to 0 to prevent OpenGL culling
         text_surface = large_font.render(prompt_text, True, (255, 255, 255))
         prompt_x = max(0, (WIDTH - text_surface.get_width()) // 2)
-        
-        # Render centered prompt
         draw_text(large_font, prompt_x, prompt_y, prompt_text, prompt_color)
 
     glEnable(GL_DEPTH_TEST)
@@ -707,6 +703,7 @@ def draw_overlay(small_font, large_font, axis_labels):
     glMatrixMode(GL_PROJECTION)
     glPopMatrix()
     glMatrixMode(GL_MODELVIEW)
+
 
 def projected_axis_labels(size):
     """Project X, Y, and Z labels near the positive ends of the edge axes."""
@@ -788,13 +785,23 @@ def get_random_valid_position(padding=10, min_dist=15.0):
 def main():
     """Run the interactive 3D viewer."""
     global camera_distance, rotation_x, rotation_y, paused, step_number, field_vbo
+    global WIDTH, HEIGHT  # Add this to modify the global resolution variables
+    global FIELD_OPACITY
 
     pygame.init()
     pygame.key.set_repeat(200, 30)
-    small_font = pygame.font.Font(None, 23)
-    large_font = pygame.font.Font(None, 34)
+    # small_font = pygame.font.Font(None, 23)
+    small_font = pygame.font.Font(None, 30)
+    large_font = pygame.font.Font(None, 39)
     pygame.display.set_caption("3D Yee FDTD | Ey field and source")
-    pygame.display.set_mode((WIDTH, HEIGHT), DOUBLEBUF | OPENGL)
+    
+    # Retrieve the native screen resolution
+    info = pygame.display.Info()
+    WIDTH, HEIGHT = info.current_w, info.current_h
+    
+    # Enable fullscreen mode with the native resolution
+    pygame.display.set_mode((WIDTH, HEIGHT), DOUBLEBUF | OPENGL | FULLSCREEN)
+    
     initialize_field_renderer()
     field_vbo = glGenBuffers(1)
     print("OpenGL GPU:", glGetString(GL_RENDERER).decode())
@@ -808,7 +815,6 @@ def main():
     glClearColor(0.035, 0.04, 0.055, 1.0)
 
     clock = pygame.time.Clock()
-    opacity_dragging = False
     running = True
 
     while running:
@@ -821,6 +827,19 @@ def main():
                     running = False
                 elif event.key == K_SPACE:
                     paused = not paused
+                elif event.key in (K_MINUS, K_KP_MINUS):
+                    FIELD_OPACITY = max(OPACITY_MIN, FIELD_OPACITY - 0.002)
+                elif event.key in (K_EQUALS, K_PLUS, K_KP_PLUS):
+                    FIELD_OPACITY = min(OPACITY_MAX, FIELD_OPACITY + 0.002)
+                elif event.key == K_c:
+                    # Reset the simulation and viewer states
+                    sim.reset()
+                    step_number = 0
+                    input_state["stage"] = 0
+                    input_state["shape"] = None
+                    input_state["behaviour"] = None
+                    input_state["axis"] = None
+                    input_state["position"] = [sim.N // 2, sim.N // 2, sim.N // 2]
                 
                 elif input_state["stage"] == 0 and event.key == K_n:
                     input_state["stage"] = 1
@@ -844,33 +863,17 @@ def main():
                         input_state["behaviour"] = "Packet Burst"
                         input_state["stage"] = 3
 
-                    if input_state["shape"] == "Wi-Fi Router": # If the dipoles are not oriented along the y-axis, then E_y will be low, and the waves will appear to be very weak.
-                        input_state["axis"] = 1
-                        input_state["stage"] = 4
+                    if input_state["stage"] == 3:
+                        input_state["axis"] = 0
+                        input_state["position"] = [sim.N // 2, sim.N // 2, sim.N // 2]
                 
                 elif input_state["stage"] == 3:
-                    valid_selection = False
-                    if event.key == K_1:
-                        input_state["axis"] = 0
-                        valid_selection = True
-                        input_state["stage"] = 4
-                    elif event.key == K_2 and input_state["shape"] != "Current loop": # Since the renderer checks E_y, a ring with a vertical axis appears to emit nothing. If we change the renderer to check |E| instead of E_y, we stop seeing different colours for different half cycles (since |E| is always positive).
-                        input_state["axis"] = 1
-                        valid_selection = True
-                        input_state["stage"] = 4
-                    elif event.key == K_3:
-                        input_state["axis"] = 2
-                        valid_selection = True
-                        input_state["stage"] = 4
-                    
-                    if valid_selection:
-                        input_state["position"] = [sim.N // 2, sim.N // 2, sim.N // 2]
-                    
-                elif input_state["stage"] == 4:
                     keys = pygame.key.get_pressed()
                     shift_pressed = keys[K_LSHIFT] or keys[K_RSHIFT]
 
-                    if shift_pressed:
+                    if event.key == K_r:
+                        input_state["axis"] = (input_state["axis"] + 1) % 3
+                    elif shift_pressed:
                         if (event.key == K_LEFT or event.key == K_DOWN) and input_state["position"][2] > 10:
                             input_state["position"][2] = max(0, input_state["position"][2] - 1)
                         elif (event.key == K_RIGHT or event.key == K_UP) and input_state["position"][2] < 90:
@@ -903,32 +906,17 @@ def main():
                         input_state["position"] = [sim.N // 2, sim.N // 2, sim.N // 2]
 
             elif event.type == MOUSEBUTTONDOWN:
-                if event.button == 1:
-                    opacity_dragging = mouse_over_opacity_slider(event.pos)
-                    if opacity_dragging:
-                        update_opacity_from_mouse(event.pos[1])
-
-                elif event.button == 4:
+                if event.button == 4:
                     camera_distance = max(35, camera_distance - 4)
                 elif event.button == 5:
                     camera_distance = min(180, camera_distance + 4)
 
-            elif event.type == MOUSEBUTTONUP:
-                if event.button == 1:
-                    opacity_dragging = False
-
             elif event.type == MOUSEMOTION:
-
                 if event.buttons[0]:  # Left mouse button held
-
-                    if opacity_dragging:
-                        # Move the slider vertically.
-                        update_opacity_from_mouse(event.pos[1])
-                    else:
-                        # Rotate the cube.
-                        dx_mouse, dy_mouse = event.rel
-                        rotation_y += dx_mouse * 0.5
-                        rotation_x += dy_mouse * 0.5
+                    # Rotate the cube.
+                    dx_mouse, dy_mouse = event.rel
+                    rotation_y += dx_mouse * 0.5
+                    rotation_x += dy_mouse * 0.5
 
             elif event.type == MOUSEWHEEL:
                 camera_distance = max(
